@@ -1,0 +1,92 @@
+name: Chronicle
+options:
+  bundleIdPrefix: com.chronicle
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  ChronicleCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - Sources/ChronicleCore
+    dependencies:
+      - sdk: EventKit.framework
+    settings:
+      base:
+        PRODUCT_NAME: ChronicleCore
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+
+  chronicle-extract:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/chronicle-extract
+    dependencies:
+      - target: ChronicleCore
+      - sdk: EventKit.framework
+    settings:
+      base:
+        PRODUCT_NAME: chronicle-extract
+        PRODUCT_BUNDLE_IDENTIFIER: com.chronicle.extract
+        INFOPLIST_FILE: Extractor/Info.plist
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        CODE_SIGN_ENTITLEMENTS: Extractor/Extractor.entitlements
+
+  Chronicle:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/Chronicle
+    dependencies:
+      - target: ChronicleCore
+      - sdk: EventKit.framework
+    settings:
+      base:
+        PRODUCT_NAME: Chronicle
+        PRODUCT_BUNDLE_IDENTIFIER: com.chronicle.app
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/Chronicle.entitlements
+        ENABLE_APP_SANDBOX: NO
+
+  ChronicleCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/ChronicleCoreTests
+    dependencies:
+      - target: ChronicleCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chronicle.core.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Chronicle:
+    build:
+      targets:
+        Chronicle: all
+    run:
+      config: Debug
+  chronicle-extract:
+    build:
+      targets:
+        chronicle-extract: all
+    run:
+      config: Debug
+  ChronicleCore:
+    build:
+      targets:
+        ChronicleCore: all
+        ChronicleCoreTests: [test]
+    test:
+      targets:
+        - ChronicleCoreTests

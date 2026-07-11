@@ -6,7 +6,7 @@ Calendar Metrics Dashboard Specification
 
 Build a local calendar metrics pipeline using **EventKit** on macOS. The
 system extracts time allocation from Apple Calendar, stores normalized
-daily aggregates, and serves them to a local web dashboard.
+daily aggregates, and serves them to a native macOS dashboard.
 
 This project has a deliberately narrow scope. It only tracks:
 
@@ -32,10 +32,18 @@ Daily extraction job
         ↓
 SQLite
         ↓
-Local web dashboard
+Native macOS dashboard (SwiftUI + Swift Charts)
 ```
 
-The extractor should be written in Swift using EventKit. It runs once
+The project is built as three Swift targets (see `project.yml`):
+
+-   `ChronicleCore` — a static library holding title normalization/parsing,
+    models, the SQLite layer, and aggregation queries.
+-   `chronicle-extract` — a command-line tool, the only EventKit consumer, run
+    once daily by a launchd agent.
+-   `Chronicle` — a read-only SwiftUI viewer app.
+
+The extractor is written in Swift using EventKit. It runs once
 per day and rebuilds a rolling window of aggregates.
 
 ------------------------------------------------------------------------
@@ -92,12 +100,16 @@ Apply in this order:
 
 1.  Unicode normalize.
 2.  Remove emoji.
-3.  Remove punctuation except the configured subtask separator.
-4.  Remove parenthesized metadata (for example `(%2)`).
+3.  Remove parenthesized metadata (for example `(%2)`).
+4.  Remove punctuation except the configured subtask separator.
 5.  Collapse whitespace.
 6.  Trim.
 7.  Compare case-insensitively.
 8.  Preserve canonical display labels separately.
+
+> Note: parenthesized metadata is removed **before** generic punctuation.
+> Stripping punctuation first would delete the parentheses and make the
+> `(...)` metadata undetectable.
 
 Treat `" - "` (space-hyphen-space) as the only subtask separator.
 
@@ -109,12 +121,16 @@ Do not split ordinary hyphenated words.
 
 For every EventKit event:
 
-1.  Ignore all-day events.
-2.  Clip to the extraction window.
-3.  Split events crossing midnight into one segment per local day.
-4.  Normalize and parse the title.
-5.  Add duration to the corresponding daily bucket.
-6.  Count one occurrence per event occurrence (not per split segment).
+1.  Only consider events from calendars the user has selected (the allowlist,
+    chosen via the in-app **Calendars** picker and persisted to config).
+2.  Ignore all-day events.
+3.  Clip to the extraction window.
+4.  Split events crossing midnight into one segment per local day.
+5.  Normalize and parse the title.
+6.  Add duration to the corresponding daily bucket.
+7.  Count one occurrence per event occurrence (not per split segment).
+    The single occurrence is attributed to the local day the event **starts**,
+    so multi-day ranges never double-count it.
 
 Recurring events should **not** be expanded manually.
 
@@ -246,6 +262,24 @@ Delete and regenerate aggregates for this window.
 
 This automatically handles edited, moved, deleted, and detached
 recurring events.
+
+------------------------------------------------------------------------
+
+# Configuration & Data Locations
+
+Configuration is a JSON file created on first run:
+
+`~/Library/Application Support/Chronicle/config.json`
+
+-   `calendarAllowlist` — calendar names to include (case-insensitive). Normally
+    managed from the app's **Calendars** toolbar picker (checkboxes with the
+    calendar's color); the app reads and writes this field. Hand-editing is
+    optional.
+-   `subtaskSeparator` — defaults to `" - "`.
+-   `windowPastDays` / `windowFutureDays` — the rolling window (default 60 / 14).
+
+The SQLite database lives at
+`~/Library/Application Support/Chronicle/chronicle.db`.
 
 ------------------------------------------------------------------------
 

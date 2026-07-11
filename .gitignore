@@ -1,0 +1,12 @@
+# Xcode / build artifacts
+.build-xcode/
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+
+# Generated project (regenerate with `xcodegen generate`)
+Chronicle.xcodeproj/
+
+# macOS
+.DS_Store
