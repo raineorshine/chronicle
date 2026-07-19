@@ -179,10 +179,7 @@ private struct DashboardDetail: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
-            HStack(spacing: 24) {
-                LatestWeekMetric(store: store)
-                Metric(value: "\(store.totals.occurrences)", label: "Occurrences")
-            }
+            LatestWeekMetric(store: store)
         }
     }
 
@@ -325,18 +322,6 @@ extension Color {
             green: Double((value >> 8) & 0xFF) / 255.0,
             blue: Double(value & 0xFF) / 255.0
         )
-    }
-}
-
-private struct Metric: View {
-    let value: String
-    let label: String
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(value).font(.title).monospacedDigit().bold()
-            Text(label).font(.caption).foregroundStyle(.secondary)
-        }
     }
 }
 
