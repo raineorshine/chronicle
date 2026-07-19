@@ -22,6 +22,8 @@ final class DashboardStore: ObservableObject {
     @Published var stacks: WeeklyStacks = .empty
     /// Segment styles (display label + color) in stacking / legend order.
     @Published var segmentStyles: [SegmentStyle] = []
+    /// Per-task color overrides (task_key -> `#RRGGBB`), mirrored from config.
+    @Published var taskColors: [String: String] = [:]
     @Published var totals: RangeTotals = .zero
     @Published var errorMessage: String?
     @Published var isRefreshing = false
@@ -140,7 +142,9 @@ final class DashboardStore: ObservableObject {
                                               dimension: plan.dimension,
                                               from: bounds.from, to: bounds.to)
         stacks = WeeklyBucketing.bucket(daily, calendar: calendar, topN: 8)
-        segmentStyles = Self.styles(for: stacks.segments)
+        segmentStyles = Self.styles(for: stacks.segments,
+                                    dimension: plan.dimension,
+                                    overrides: taskColors)
         // Sidebar lists the window's activities but tallies only the current week.
         let week = currentWeekBounds
         taskList = try db.taskSummaries(windowFrom: bounds.from, windowTo: bounds.to,
@@ -235,19 +239,43 @@ final class DashboardStore: ObservableObject {
         Color(hex: "#BAB0AC")!
     ]
 
-    /// Resolves segments to unique display labels + palette colors. Task and
-    /// subtask keys are calendar-agnostic (merged cross-calendar), so labels are
-    /// used directly; a generic collision guard keeps the legend unambiguous.
-    private static func styles(for segments: [WeeklySegment]) -> [SegmentStyle] {
+    /// A stable palette color derived deterministically from a segment key, so a
+    /// task keeps the same auto-color across scopes, windows, and launches
+    /// (unlike Swift's per-run-randomized `Hasher`). Uses FNV-1a over the key's
+    /// UTF-8 bytes to index the palette.
+    static func stableColor(forKey key: String) -> Color {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in key.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return palette[Int(hash % UInt64(palette.count))]
+    }
+
+    /// The effective color for a task: its override if set, else its stable
+    /// auto-color. Drives the sidebar swatch.
+    func taskColor(forKey key: String) -> Color {
+        if let hex = taskColors[key], let c = Color(hex: hex) { return c }
+        return Self.stableColor(forKey: key)
+    }
+
+    /// Resolves segments to unique display labels + colors. The "Other" bucket is
+    /// gray; every other segment uses a stable auto-color derived from its key.
+    /// At the task level, a per-task override (from `overrides`) wins. A generic
+    /// collision guard keeps legend labels unambiguous.
+    private static func styles(for segments: [WeeklySegment],
+                               dimension: SegmentDimension,
+                               overrides: [String: String]) -> [SegmentStyle] {
         var used: Set<String> = []
-        var paletteIndex = 0
         return segments.map { segment in
             let color: Color
             if segment.isOther {
                 color = .gray
+            } else if dimension == .task, let hex = overrides[segment.key],
+                      let override = Color(hex: hex) {
+                color = override
             } else {
-                color = palette[paletteIndex % palette.count]
-                paletteIndex += 1
+                color = stableColor(forKey: segment.key)
             }
 
             var unique = segment.label
@@ -256,6 +284,29 @@ final class DashboardStore: ObservableObject {
             used.insert(unique)
 
             return SegmentStyle(key: segment.key, displayLabel: unique, color: color)
+        }
+    }
+
+    /// Assigns (or clears, when `color` is nil) a task's color override, persists
+    /// it to config, and recomputes segment styles. Color is display-only, so
+    /// this never re-extracts from Calendar.
+    func setTaskColor(_ key: String, _ color: Color?) {
+        do {
+            var config = try ChronicleConfig.load()
+            if let color, let hex = color.hexString {
+                config.taskColors[key] = hex
+            } else {
+                config.taskColors.removeValue(forKey: key)
+            }
+            try config.save()
+            taskColors = config.taskColors
+            // Recompute styles for the current scope so the chart/legend update.
+            segmentStyles = Self.styles(for: stacks.segments,
+                                        dimension: queryPlan.dimension,
+                                        overrides: taskColors)
+            objectWillChange.send()
+        } catch {
+            errorMessage = "\(error)"
         }
     }
 
@@ -334,6 +385,7 @@ final class DashboardStore: ObservableObject {
         if let config = try? ChronicleConfig.load() {
             allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
             subtractiveTitleKeys = Set(config.subtractiveCalendars.map(Self.normalizeTitle))
+            taskColors = config.taskColors
         }
     }
 

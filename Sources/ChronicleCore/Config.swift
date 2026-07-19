@@ -21,23 +21,30 @@ public struct ChronicleConfig: Codable, Equatable {
     /// Rolling window: how many days into the future to rebuild.
     public var windowFutureDays: Int
 
+    /// Per-task color overrides, keyed by `task_key`, as `#RRGGBB` strings.
+    /// Display-only: changing a color never triggers re-extraction. Tasks
+    /// without an entry fall back to a stable auto-color derived from their key.
+    public var taskColors: [String: String]
+
     public init(calendarAllowlist: [String] = [],
                 subtaskSeparator: String = " - ",
                 subtractiveCalendars: [String] = [],
                 windowPastDays: Int = 60,
-                windowFutureDays: Int = 14) {
+                windowFutureDays: Int = 14,
+                taskColors: [String: String] = [:]) {
         self.calendarAllowlist = calendarAllowlist
         self.subtaskSeparator = subtaskSeparator
         self.subtractiveCalendars = subtractiveCalendars
         self.windowPastDays = windowPastDays
         self.windowFutureDays = windowFutureDays
+        self.taskColors = taskColors
     }
 
     public static let `default` = ChronicleConfig()
 
     private enum CodingKeys: String, CodingKey {
         case calendarAllowlist, subtaskSeparator, subtractiveCalendars
-        case windowPastDays, windowFutureDays
+        case windowPastDays, windowFutureDays, taskColors
     }
 
     /// Tolerant decoding so configs written by older versions (which lack the
@@ -50,6 +57,7 @@ public struct ChronicleConfig: Codable, Equatable {
         subtractiveCalendars = try c.decodeIfPresent([String].self, forKey: .subtractiveCalendars) ?? d.subtractiveCalendars
         windowPastDays = try c.decodeIfPresent(Int.self, forKey: .windowPastDays) ?? d.windowPastDays
         windowFutureDays = try c.decodeIfPresent(Int.self, forKey: .windowFutureDays) ?? d.windowFutureDays
+        taskColors = try c.decodeIfPresent([String: String].self, forKey: .taskColors) ?? d.taskColors
     }
 
     /// Loads config from disk. If the file is missing, writes and returns the
