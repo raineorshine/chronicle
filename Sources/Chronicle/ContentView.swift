@@ -375,8 +375,8 @@ private struct WindowControls: View {
 
 private struct WeeklyChartCard: View {
     @ObservedObject var store: DashboardStore
-    @State private var hoveredWeek: String?
-    @State private var hoverX: CGFloat = 0
+    @State private var hovered: DashboardStore.HoveredSegment?
+    @State private var hoverPoint: CGPoint = .zero
 
     var body: some View {
         Group {
@@ -428,18 +428,24 @@ private struct WeeklyChartCard: View {
                                 guard let plotAnchor = proxy.plotFrame else { return }
                                 let plot = geo[plotAnchor]
                                 let x = location.x - plot.origin.x
-                                if let week: String = proxy.value(atX: x) {
-                                    hoveredWeek = week
-                                    hoverX = location.x
+                                let y = location.y - plot.origin.y
+                                if let week: String = proxy.value(atX: x),
+                                   let hours: Double = proxy.value(atY: y),
+                                   let seg = store.segment(inWeek: week, atHours: hours) {
+                                    hovered = seg
+                                    hoverPoint = location
+                                } else {
+                                    hovered = nil
                                 }
                             case .ended:
-                                hoveredWeek = nil
+                                hovered = nil
                             }
                         }
-                    if let week = hoveredWeek, !store.segments(inWeek: week).isEmpty {
-                        tooltip(for: week)
+                    if let seg = hovered {
+                        tooltip(for: seg)
                             .fixedSize()
-                            .offset(x: min(max(hoverX - 90, 0), geo.size.width - 200), y: 4)
+                            .offset(x: min(max(hoverPoint.x - 70, 0), geo.size.width - 150),
+                                    y: min(max(hoverPoint.y - 44, 0), geo.size.height - 44))
                             .allowsHitTesting(false)
                     }
                 }
@@ -447,33 +453,18 @@ private struct WeeklyChartCard: View {
         }
     }
 
-    private func tooltip(for week: String) -> some View {
-        let rows = store.segments(inWeek: week)
-        let total = rows.reduce(0) { $0 + $1.hours }
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(store.weekLabelShort(week)
-                 + (week == store.currentWeekStart ? " · in progress" : ""))
-                .font(.caption).bold()
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 2).fill(row.color)
-                        .frame(width: 9, height: 9)
-                    Text(row.label).font(.caption2).lineLimit(1)
-                    Spacer(minLength: 12)
-                    Text(String(format: "%.1fh", row.hours))
-                        .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-                }
-            }
-            Divider()
-            HStack {
-                Text("Total").font(.caption2).bold()
-                Spacer(minLength: 12)
-                Text(String(format: "%.1fh", total))
-                    .font(.caption2).monospacedDigit().bold()
-            }
+    private func tooltip(for seg: DashboardStore.HoveredSegment) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2).fill(seg.color)
+                .frame(width: 9, height: 9)
+            Text(seg.label).font(.caption2).lineLimit(1)
+            Spacer(minLength: 12)
+            Text(String(format: "%.1fh", seg.hours))
+                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
         }
         .padding(8)
-        .frame(width: 200, alignment: .leading)
+        .frame(maxWidth: 220)
+        .fixedSize(horizontal: true, vertical: false)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
         .shadow(radius: 6, y: 2)
