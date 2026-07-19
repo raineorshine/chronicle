@@ -252,7 +252,7 @@ single neutral **Other** segment. A legend names each segment and a hover toolti
 lists a week's per-segment hours and total. The current, in-progress week is
 rendered dimmed.
 
-Week boundaries follow the locale's first weekday. Per-day, per-segment hours are
+Week boundaries start on Monday. Per-day, per-segment hours are
 read from `daily_time` via SQL aggregation and bucketed into weeks in the app;
 no weekly tables are stored.
 

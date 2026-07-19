@@ -188,8 +188,8 @@ the demo rows are automatically replaced the first time you extract real data.
   handled automatically.
 - **Views.** The dashboard shows a trailing window of **N weeks** (4/8/12). A
   per-day, per-segment series is read from the single `daily_time` table with SQL
-  aggregation, then bucketed into weeks in Swift (honoring the locale's
-  `firstWeekday`) and reduced to the top activities plus an **Other** bucket.
+  aggregation, then bucketed into weeks in Swift (weeks start on **Monday**)
+  and reduced to the top activities plus an **Other** bucket.
 
 ## Tests
 
