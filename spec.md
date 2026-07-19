@@ -263,20 +263,30 @@ Support aggregation by:
 -   Calendar + Task
 -   Calendar + Task + Subtask
 
-Support time ranges:
+The dashboard displays a **weeks-on-X stacked bar chart** over a trailing window
+of **N weeks** (4 / 8 / 12, selectable). Each bar is one week; each bar is split
+into colored **segments**, and the segmentation **adapts to the current scope**:
 
--   Week
--   Month
--   Year
--   Custom
+-   At the top level (All Calendars) or a single-calendar scope, segments are
+    **activities** (Tasks), namespaced by calendar so equal task names in
+    different calendars stay distinct.
+-   Selecting an activity re-stacks that scope by its **Subtasks** (events with no
+    subtask fold into a "(no subtask)" segment). Subtask breakdown is secondary.
 
-The graph always plots daily hours. Bars are colored to match each source
-calendar's color (persisted as `calendar_color`). A single-calendar (or
-task/subtask) selection renders bars in that calendar's color; **All Calendars**
-stacks each day into per-calendar segments, each in its own color, with a
-legend.
+To keep the chart legible, only the top activities/subtasks (by total hours over
+the window) get their own colored segment; the remaining long tail folds into a
+single neutral **Other** segment. A legend names each segment and a hover tooltip
+lists a week's per-segment hours and total. The current, in-progress week is
+rendered dimmed.
 
-The selected range displays total hours and occurrence count.
+Week boundaries start on Monday. Per-day, per-segment hours are
+read from `daily_time` via SQL aggregation and bucketed into weeks in the app;
+no weekly tables are stored.
+
+The header shows the latest week's total hours with a delta versus the previous
+week, plus the window's occurrence count.
+
+> The display tracks only hours and occurrence counts — no additional metrics.
 
 ------------------------------------------------------------------------
 
