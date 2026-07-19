@@ -5,6 +5,7 @@ import ChronicleCore
 
 struct ContentView: View {
     @StateObject private var store = DashboardStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationSplitView {
@@ -14,6 +15,11 @@ struct ContentView: View {
             DashboardDetail(store: store)
         }
         .onAppear { store.load() }
+        .onChange(of: scenePhase) { _, phase in
+            // Re-check when returning to the app (e.g. after granting access in
+            // System Settings) so the picker refreshes without a restart.
+            if phase == .active { store.refreshCalendarAccessState() }
+        }
     }
 }
 
@@ -276,11 +282,22 @@ private struct CalendarPicker: View {
 
     private var accessRequestView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Chronicle needs access to your calendars to list them here.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Button("Grant Calendar Access") {
-                store.loadCalendars()
+            if store.calendarAccessDenied {
+                Text("Calendar access is turned off for Chronicle. Enable it in "
+                     + "System Settings › Privacy & Security › Calendars, then "
+                     + "return here.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Button("Open System Settings") {
+                    store.openCalendarSettings()
+                }
+            } else {
+                Text("Chronicle needs access to your calendars to list them here.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Button("Grant Calendar Access") {
+                    store.requestCalendarAccess()
+                }
             }
         }
         .padding(14)
