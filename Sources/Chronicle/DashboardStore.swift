@@ -7,7 +7,8 @@ import ChronicleCore
 /// read from SQLite.
 @MainActor
 final class DashboardStore: ObservableObject {
-    @Published var calendars: [CalendarNode] = []
+    /// Flat, hours-sorted task list (merged across calendars) for the sidebar.
+    @Published var taskList: [TaskSummary] = []
     @Published var selection: HierarchySelection = .all
     @Published var selectedNodeID: String = "all"
 
@@ -81,11 +82,10 @@ final class DashboardStore: ObservableObject {
     /// The segment dimension and the scope filter for the current selection:
     /// a task/subtask selection breaks down by Subtask; otherwise by Task.
     private var queryPlan: (dimension: SegmentDimension, scope: HierarchySelection) {
-        if selection.taskKey != nil {
-            return (.subtask, HierarchySelection(calendarKey: selection.calendarKey,
-                                                 taskKey: selection.taskKey))
+        if let taskKey = selection.taskKey {
+            return (.subtask, HierarchySelection(taskKey: taskKey))
         }
-        return (.task, HierarchySelection(calendarKey: selection.calendarKey))
+        return (.task, .all)
     }
 
     // MARK: - Loading
@@ -94,7 +94,6 @@ final class DashboardStore: ObservableObject {
         syncSelectionFromConfig()
         do {
             let db = try openDatabase()
-            calendars = try db.hierarchy()
             try reload(using: db)
             errorMessage = nil
         } catch {
@@ -122,7 +121,8 @@ final class DashboardStore: ObservableObject {
                                               dimension: plan.dimension,
                                               from: bounds.from, to: bounds.to)
         stacks = WeeklyBucketing.bucket(daily, calendar: calendar, topN: 8)
-        segmentStyles = Self.styles(for: stacks.segments, calendars: calendars)
+        segmentStyles = Self.styles(for: stacks.segments)
+        taskList = try db.taskSummaries(from: bounds.from, to: bounds.to)
         totals = try db.totals(selection: selection, from: bounds.from, to: bounds.to)
     }
 
@@ -199,17 +199,10 @@ final class DashboardStore: ObservableObject {
         Color(hex: "#BAB0AC")!
     ]
 
-    /// Resolves segments to unique display labels + palette colors. Duplicate
-    /// labels (e.g. same task name in two calendars) are disambiguated with the
-    /// calendar name so the legend and color scale stay unambiguous.
-    private static func styles(for segments: [WeeklySegment],
-                               calendars: [CalendarNode]) -> [SegmentStyle] {
-        let calendarLabel = Dictionary(uniqueKeysWithValues:
-            calendars.map { ($0.key, $0.label) })
-
-        var labelCounts: [String: Int] = [:]
-        for s in segments where !s.isOther { labelCounts[s.label, default: 0] += 1 }
-
+    /// Resolves segments to unique display labels + palette colors. Task and
+    /// subtask keys are calendar-agnostic (merged cross-calendar), so labels are
+    /// used directly; a generic collision guard keeps the legend unambiguous.
+    private static func styles(for segments: [WeeklySegment]) -> [SegmentStyle] {
         var used: Set<String> = []
         var paletteIndex = 0
         return segments.map { segment in
@@ -221,15 +214,9 @@ final class DashboardStore: ObservableObject {
                 paletteIndex += 1
             }
 
-            var label = segment.label
-            if !segment.isOther, (labelCounts[segment.label] ?? 0) > 1 {
-                let calKey = segment.key.split(separator: "\u{1F}").first.map(String.init) ?? ""
-                if let cal = calendarLabel[calKey] { label = "\(segment.label) · \(cal)" }
-            }
-            // Guard against any remaining collisions.
-            var unique = label
+            var unique = segment.label
             var n = 2
-            while used.contains(unique) { unique = "\(label) (\(n))"; n += 1 }
+            while used.contains(unique) { unique = "\(segment.label) (\(n))"; n += 1 }
             used.insert(unique)
 
             return SegmentStyle(key: segment.key, displayLabel: unique, color: color)
@@ -240,22 +227,16 @@ final class DashboardStore: ObservableObject {
 
     /// A human-readable path for the current selection, derived from labels.
     var currentTitle: String {
-        let parts = selectedNodeID.split(separator: ":").map(String.init)
-        guard let kind = parts.first else { return "All Calendars" }
-        switch kind {
-        case "cal" where parts.count >= 2:
-            return calendars.first { $0.key == parts[1] }?.label ?? "Calendar"
-        case "task" where parts.count >= 3:
-            let cal = calendars.first { $0.key == parts[1] }
-            let task = cal?.tasks.first { $0.key == parts[2] }
-            return [cal?.label, task?.label].compactMap { $0 }.joined(separator: " / ")
-        case "sub" where parts.count >= 4:
-            let cal = calendars.first { $0.key == parts[1] }
-            let task = cal?.tasks.first { $0.key == parts[2] }
-            let sub = task?.subtasks.first { $0.key == parts[3] }
-            return [cal?.label, task?.label, sub?.label].compactMap { $0 }.joined(separator: " / ")
-        default:
-            return "All Calendars"
+        switch selection.taskKey {
+        case .none:
+            return "All Tasks"
+        case .some(let taskKey):
+            let task = taskList.first { $0.key == taskKey }
+            guard let subKey = selection.subtaskKey else {
+                return task?.label ?? "Task"
+            }
+            let sub = task?.subtasks.first { $0.key == subKey }
+            return [task?.label, sub?.label].compactMap { $0 }.joined(separator: " / ")
         }
     }
 
@@ -270,28 +251,19 @@ final class DashboardStore: ObservableObject {
     var isTaskLevel: Bool { selection.taskKey == nil }
 
     /// Drills into an activity segment so the chart re-stacks it by subtask.
-    /// No-op for the "Other" bucket or when already at subtask level.
+    /// No-op for the "Other" bucket or when already at subtask level. The
+    /// segment key is the (calendar-agnostic) task key.
     func drillInto(segmentKey key: String) {
         guard isTaskLevel, key != WeeklyBucketing.otherKey else { return }
-        let parts = key.split(separator: "\u{1F}").map(String.init)
-        guard parts.count == 2 else { return }
-        select(HierarchySelection(calendarKey: parts[0], taskKey: parts[1]),
-               nodeID: "task:\(parts[0]):\(parts[1])")
+        select(HierarchySelection(taskKey: key), nodeID: "task:\(key)")
     }
 
-    /// Moves the scope up one level (subtask → task → calendar → all).
+    /// Moves the scope up one level (subtask → task → all).
     func drillUp() {
-        let parts = selectedNodeID.split(separator: ":").map(String.init)
-        switch parts.first {
-        case "sub" where parts.count >= 3:
-            select(HierarchySelection(calendarKey: parts[1], taskKey: parts[2]),
-                   nodeID: "task:\(parts[1]):\(parts[2])")
-        case "task" where parts.count >= 2:
-            select(HierarchySelection(calendarKey: parts[1]), nodeID: "cal:\(parts[1])")
-        case "cal":
+        if selection.subtaskKey != nil, let taskKey = selection.taskKey {
+            select(HierarchySelection(taskKey: taskKey), nodeID: "task:\(taskKey)")
+        } else if selection.taskKey != nil {
             select(.all, nodeID: "all")
-        default:
-            break
         }
     }
 

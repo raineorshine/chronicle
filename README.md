@@ -153,10 +153,12 @@ each segment and hovering a week shows a tooltip with its per-activity hours and
 total. The current (in-progress) week is drawn dimmed and marked with a dot.
 
 The header shows **this week's hours** with a colored **▲/▼ delta versus last
-week**, plus the window's occurrence count. Segments **adapt to scope**: at the
-top level (or a single calendar) they are activities; click a legend entry — or
-a node in the sidebar — to drill into an activity and re-stack it by its
-**subtasks**. The back chevron in the header moves the scope up a level.
+week**, plus the window's occurrence count. The **sidebar** on the left is a flat
+list of **activities** (Tasks) merged across all calendars and **sorted by hours**
+over the current window, each showing its total and expandable to its subtasks.
+Segments **adapt to scope**: at the top level they are activities; click a legend
+entry — or a task in the sidebar — to drill into an activity and re-stack it by
+its **subtasks**. The back chevron in the header moves the scope up a level.
 **Refresh** re-extracts from your selected calendars (in-process) and reloads.
 
 ## Trying it without Calendar access (demo data)

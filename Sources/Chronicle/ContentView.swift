@@ -24,46 +24,27 @@ private struct HierarchySidebar: View {
 
     var body: some View {
         List {
-            SelectableRow(title: "All Calendars",
+            SelectableRow(title: "All Tasks",
                           isSelected: store.selectedNodeID == "all",
                           systemImage: "square.grid.2x2") {
                 store.select(.all, nodeID: "all")
             }
 
-            ForEach(store.calendars) { cal in
-                CalendarDisclosure(store: store, calendar: cal)
+            ForEach(store.taskList) { task in
+                TaskRow(store: store, task: task)
             }
         }
         .listStyle(.sidebar)
     }
 }
 
-private struct CalendarDisclosure: View {
+/// One task in the flat, hours-sorted list. Expands to its merged subtasks when
+/// it has any; otherwise it's a single selectable row.
+private struct TaskRow: View {
     @ObservedObject var store: DashboardStore
-    let calendar: CalendarNode
+    let task: TaskSummary
 
-    var body: some View {
-        DisclosureGroup {
-            ForEach(calendar.tasks) { task in
-                TaskDisclosure(store: store, calendarKey: calendar.key, task: task)
-            }
-        } label: {
-            SelectableRow(title: calendar.label,
-                          isSelected: store.selectedNodeID == "cal:\(calendar.key)",
-                          systemImage: "calendar") {
-                store.select(HierarchySelection(calendarKey: calendar.key),
-                             nodeID: "cal:\(calendar.key)")
-            }
-        }
-    }
-}
-
-private struct TaskDisclosure: View {
-    @ObservedObject var store: DashboardStore
-    let calendarKey: String
-    let task: TaskNode
-
-    private var nodeID: String { "task:\(calendarKey):\(task.key)" }
+    private var nodeID: String { "task:\(task.key)" }
 
     var body: some View {
         Group {
@@ -72,13 +53,13 @@ private struct TaskDisclosure: View {
             } else {
                 DisclosureGroup {
                     ForEach(task.subtasks) { sub in
-                        let subID = "sub:\(calendarKey):\(task.key):\(sub.key)"
+                        let subID = "sub:\(task.key):\(sub.key)"
                         SelectableRow(title: sub.label,
                                       isSelected: store.selectedNodeID == subID,
                                       systemImage: "circle.fill",
-                                      indent: 1) {
-                            store.select(HierarchySelection(calendarKey: calendarKey,
-                                                            taskKey: task.key,
+                                      indent: 1,
+                                      detail: Self.hours(sub.hours)) {
+                            store.select(HierarchySelection(taskKey: task.key,
                                                             subtaskKey: sub.key),
                                          nodeID: subID)
                         }
@@ -91,10 +72,14 @@ private struct TaskDisclosure: View {
     private var taskRow: some View {
         SelectableRow(title: task.label,
                       isSelected: store.selectedNodeID == nodeID,
-                      systemImage: "list.bullet") {
-            store.select(HierarchySelection(calendarKey: calendarKey, taskKey: task.key),
-                         nodeID: nodeID)
+                      systemImage: "list.bullet",
+                      detail: Self.hours(task.hours)) {
+            store.select(HierarchySelection(taskKey: task.key), nodeID: nodeID)
         }
+    }
+
+    private static func hours(_ h: Double) -> String {
+        String(format: "%.1fh", h)
     }
 }
 
@@ -103,6 +88,7 @@ private struct SelectableRow: View {
     let isSelected: Bool
     let systemImage: String
     var indent: Int = 0
+    var detail: String? = nil
     let action: () -> Void
 
     var body: some View {
@@ -113,7 +99,13 @@ private struct SelectableRow: View {
                     .foregroundStyle(.secondary)
                 Text(title)
                     .lineLimit(1)
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.leading, CGFloat(indent) * 12)
             .contentShape(Rectangle())
@@ -187,7 +179,7 @@ private struct DashboardDetail: View {
     }
 
     private var selectionTitle: String {
-        store.selectedNodeID == "all" ? "All Calendars" : store.currentTitle
+        store.selectedNodeID == "all" ? "All Tasks" : store.currentTitle
     }
 
     private func errorBanner(_ message: String) -> some View {
