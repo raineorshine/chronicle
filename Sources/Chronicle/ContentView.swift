@@ -76,16 +76,51 @@ private struct TaskRow: View {
     }
 
     private var taskRow: some View {
-        SelectableRow(title: task.label,
-                      isSelected: store.selectedNodeID == nodeID,
-                      systemImage: "list.bullet",
-                      detail: Self.hours(task.hours)) {
-            store.select(HierarchySelection(taskKey: task.key), nodeID: nodeID)
+        HStack(spacing: 6) {
+            TaskColorSwatch(store: store, taskKey: task.key)
+            Button {
+                store.select(HierarchySelection(taskKey: task.key), nodeID: nodeID)
+            } label: {
+                HStack(spacing: 6) {
+                    Text(task.label)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(Self.hours(task.hours))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
+        .listRowBackground(store.selectedNodeID == nodeID
+                           ? Color.accentColor.opacity(0.18) : Color.clear)
     }
 
     private static func hours(_ h: Double) -> String {
         String(format: "%.1fh", h)
+    }
+}
+
+/// A compact color well for a task. Tapping opens the system color picker;
+/// right-clicking offers a reset to the task's stable auto-color.
+private struct TaskColorSwatch: View {
+    @ObservedObject var store: DashboardStore
+    let taskKey: String
+
+    var body: some View {
+        ColorPicker("", selection: Binding(
+            get: { store.taskColor(forKey: taskKey) },
+            set: { store.setTaskColor(taskKey, $0) }
+        ), supportsOpacity: false)
+        .labelsHidden()
+        .frame(width: 16, height: 16)
+        .help("Set this task's color")
+        .contextMenu {
+            Button("Reset to Auto Color") { store.setTaskColor(taskKey, nil) }
+                .disabled(store.taskColors[taskKey] == nil)
+        }
     }
 }
 
@@ -353,6 +388,15 @@ extension Color {
             blue: Double(value & 0xFF) / 255.0
         )
     }
+
+    /// Serializes to an `#RRGGBB` string in sRGB; nil if it can't be converted.
+    var hexString: String? {
+        guard let srgb = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        let r = Int((srgb.redComponent * 255).rounded())
+        let g = Int((srgb.greenComponent * 255).rounded())
+        let b = Int((srgb.blueComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X", r, g, b)
+    }
 }
 
 private struct WindowControls: View {
@@ -498,21 +542,34 @@ private struct SegmentLegend: View {
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
             ForEach(store.segmentStyles) { style in
-                let drillable = store.isTaskLevel && style.key != WeeklyBucketing.otherKey
-                Button {
-                    store.drillInto(segmentKey: style.key)
-                } label: {
-                    HStack(spacing: 6) {
+                let isTask = store.isTaskLevel && style.key != WeeklyBucketing.otherKey
+                let drillable = isTask
+                HStack(spacing: 6) {
+                    if isTask {
+                        ColorPicker("", selection: Binding(
+                            get: { store.taskColor(forKey: style.key) },
+                            set: { store.setTaskColor(style.key, $0) }
+                        ), supportsOpacity: false)
+                        .labelsHidden()
+                        .frame(width: 11, height: 11)
+                        .help("Set \(style.displayLabel)'s color")
+                    } else {
                         RoundedRectangle(cornerRadius: 2).fill(style.color)
                             .frame(width: 11, height: 11)
-                        Text(style.displayLabel).font(.caption).lineLimit(1)
-                        Spacer(minLength: 0)
                     }
-                    .contentShape(Rectangle())
+                    Button {
+                        store.drillInto(segmentKey: style.key)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(style.displayLabel).font(.caption).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!drillable)
+                    .help(drillable ? "Break \(style.displayLabel) down by subtask" : "")
                 }
-                .buttonStyle(.plain)
-                .disabled(!drillable)
-                .help(drillable ? "Break \(style.displayLabel) down by subtask" : "")
             }
         }
     }
