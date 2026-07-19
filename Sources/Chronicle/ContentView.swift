@@ -103,57 +103,48 @@ private struct TaskRow: View {
     }
 }
 
-/// A compact color swatch backed by `NSColorWell`'s `.minimal` style: a small
-/// rounded square that opens the system color picker on click (unlike SwiftUI's
-/// `ColorPicker`, which renders a wide pill that can't shrink to a square).
-private struct ColorWell: NSViewRepresentable {
-    @Binding var color: Color
-    var size: CGFloat = 14
+/// Bridges a SwiftUI swatch to the process-wide `NSColorPanel`. Since the panel
+/// is a singleton, it is retargeted to whichever swatch was clicked last, and
+/// forwards live color changes to that swatch's handler.
+private final class ColorPanelController: NSObject {
+    static let shared = ColorPanelController()
+    private var onChange: ((Color) -> Void)?
 
-    func makeNSView(context: Context) -> NSColorWell {
-        let well = NSColorWell(style: .minimal)
-        well.color = NSColor(color)
-        well.target = context.coordinator
-        well.action = #selector(Coordinator.colorChanged(_:))
-        well.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            well.widthAnchor.constraint(equalToConstant: size),
-            well.heightAnchor.constraint(equalToConstant: size),
-        ])
-        return well
+    func present(initial: Color, onChange: @escaping (Color) -> Void) {
+        self.onChange = onChange
+        let panel = NSColorPanel.shared
+        panel.showsAlpha = false
+        panel.color = NSColor(initial)
+        panel.setTarget(self)
+        panel.setAction(#selector(colorDidChange(_:)))
+        panel.makeKeyAndOrderFront(nil)
     }
 
-    func updateNSView(_ nsView: NSColorWell, context: Context) {
-        context.coordinator.color = $color
-        let target = NSColor(color)
-        if nsView.color != target { nsView.color = target }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(color: $color) }
-
-    final class Coordinator: NSObject {
-        var color: Binding<Color>
-        init(color: Binding<Color>) { self.color = color }
-
-        @objc func colorChanged(_ sender: NSColorWell) {
-            color.wrappedValue = Color(sender.color)
-        }
+    @objc private func colorDidChange(_ sender: NSColorPanel) {
+        onChange?(Color(sender.color))
     }
 }
 
-/// A compact color swatch for a task. Clicking opens the system color picker;
-/// right-clicking offers a reset to the task's stable auto-color.
+/// A tiny rounded-square color swatch for a task, matching the legend's "Other"
+/// swatch. Clicking opens the system color panel; right-clicking resets to the
+/// task's stable auto-color.
 private struct TaskColorSwatch: View {
     @ObservedObject var store: DashboardStore
     let taskKey: String
-    var size: CGFloat = 14
+    var size: CGFloat = 12
 
     var body: some View {
-        ColorWell(color: Binding(
-            get: { store.taskColor(forKey: taskKey) },
-            set: { store.setTaskColor(taskKey, $0) }
-        ), size: size)
-        .frame(width: size, height: size)
+        Button {
+            ColorPanelController.shared.present(
+                initial: store.taskColor(forKey: taskKey)
+            ) { store.setTaskColor(taskKey, $0) }
+        } label: {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(store.taskColor(forKey: taskKey))
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
         .help("Set this task's color")
         .contextMenu {
             Button("Reset to Auto Color") { store.setTaskColor(taskKey, nil) }
