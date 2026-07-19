@@ -61,7 +61,9 @@ xcodebuild test  -scheme ChronicleCore   -destination 'platform=macOS'
 Open **Chronicle.app** and click the **Calendars** button in the toolbar. The
 first time, macOS prompts for calendar access — click **Allow**. You then get a
 checklist of all your calendars (with their colors); tick the ones you want
-included. Selections are saved and the dashboard re-extracts immediately.
+included. Each row also has a minus-circle button to mark that calendar
+**subtractive** (see [Subtractive calendars](#subtractive-calendars)).
+Selections are saved and the dashboard re-extracts immediately.
 
 ## Configuration
 
@@ -73,6 +75,7 @@ Your choices are stored in a config file (you normally don't edit this by hand):
 {
   "calendarAllowlist": ["Work", "Personal"],
   "subtaskSeparator": " - ",
+  "subtractiveCalendars": ["Instagram"],
   "windowPastDays": 60,
   "windowFutureDays": 14
 }
@@ -82,8 +85,30 @@ Your choices are stored in a config file (you normally don't edit this by hand):
   case-insensitively). Managed via the in-app **Calendars** picker; an empty
   list extracts nothing.
 - **subtaskSeparator** — the only substring treated as a Task/Subtask divider.
+- **subtractiveCalendars** — calendar names (case-insensitive) treated as
+  *subtractive*: their time is subtracted from overlapping events in other
+  calendars, while their own time is still counted in full (see below). A
+  subtractive calendar is always extracted, even if not in the allowlist.
 - **windowPastDays / windowFutureDays** — the rolling window that is rebuilt on
   every run (previous 60 days, today, next 14 days by default).
+
+## Subtractive calendars
+
+Any calendar can be marked **subtractive**. A subtractive calendar subtracts its
+time from any overlapping event in a non-subtractive calendar, while its own
+events are always counted in full — regardless of whether they overlap anything.
+
+For example, with a subtractive **Instagram** calendar:
+
+| Calendar A (Swim) | Instagram (subtractive) | Swim counts | Instagram counts |
+| ----------------- | ----------------------- | ----------- | ---------------- |
+| 12–5pm            | 2–5pm                   | 2h (12–2)   | 3h               |
+| 12–5pm            | 4–7pm                   | 4h (12–4)   | 3h               |
+
+To mark a calendar subtractive, open the **Calendars** picker and click the
+minus-circle icon next to it. Marking a calendar subtractive also includes it,
+since its own time is still counted. Subtractive calendars do not subtract from
+each other.
 
 ## Granting Calendar access
 
@@ -150,7 +175,9 @@ the demo rows are automatically replaced the first time you extract real data.
   the cleaned original casing is kept as the **label**.
 - **Aggregation.** All-day events are skipped; events are clipped to the window
   and split across local midnight into per-day duration segments. One occurrence
-  is counted on the day the event starts.
+  is counted on the day the event starts. Time from **subtractive** calendars is
+  removed from overlapping events in other calendars before bucketing, while the
+  subtractive events themselves are counted in full.
 - **Rolling rebuild.** Each run deletes and regenerates the window's rows in a
   single transaction, so edited/moved/deleted/detached recurring events are
   handled automatically.

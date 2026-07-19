@@ -17,14 +17,16 @@ enum SyntheticData {
 
         func color(for calendarName: String) -> String? {
             switch calendarName {
-            case "Personal": return "#34C759"   // green
-            case "Work":     return "#FF9500"   // orange
-            default:         return nil
+            case "Personal":  return "#34C759"   // green
+            case "Work":      return "#FF9500"   // orange
+            case "Instagram": return "#AF52DE"   // purple (subtractive)
+            default:          return nil
             }
         }
 
         func add(_ title: String, calendarName: String,
-                 day: Int, from: (Int, Int), to: (Int, Int)) {
+                 day: Int, from: (Int, Int), to: (Int, Int),
+                 subtractive: Bool = false) {
             guard let parsed = TitleParser.parse(title) else { return }
             events.append(EventInput(
                 calendar: TitleParser.normalize(calendarName),
@@ -32,7 +34,8 @@ enum SyntheticData {
                 start: date(day, from.0, from.1),
                 end: date(day, to.0, to.1),
                 isAllDay: false,
-                calendarColor: color(for: calendarName)))
+                calendarColor: color(for: calendarName),
+                isSubtractive: subtractive))
         }
 
         func addSpan(_ title: String, calendarName: String,
@@ -69,6 +72,11 @@ enum SyntheticData {
                 }
                 add("Reading", calendarName: "Personal",
                     day: day, from: (20, 0), to: (21, 0))
+                // Instagram is subtractive: this 20:30–21:00 slice overlaps the
+                // last half hour of Reading, so Reading counts 0.5h that evening
+                // while Instagram still counts its full 0.5h.
+                add("Instagram", calendarName: "Instagram",
+                    day: day, from: (20, 30), to: (21, 0), subtractive: true)
             } else {
                 add("Gym", calendarName: "Personal",
                     day: day, from: (10, 0), to: (11, 30))
