@@ -212,8 +212,10 @@ total. The current (in-progress) week is drawn dimmed and marked with a dot.
 
 The header shows **this week's hours** with a colored **▲/▼ delta versus last
 week**, plus the window's occurrence count. The **sidebar** on the left is a flat
-list of **activities** (Tasks) merged across all calendars and **sorted by hours**
-over the current window, each showing its total and expandable to its subtasks.
+list of **activities** (Tasks) merged across all calendars — every activity in
+the selected window is listed, but each row shows its **current-week** hours
+(`0.0h` if idle this week) and the list is **sorted by those current-week hours**,
+each expandable to its subtasks.
 Segments **adapt to scope**: at the top level they are activities; click a legend
 entry — or a task in the sidebar — to drill into an activity and re-stack it by
 its **subtasks**. The back chevron in the header moves the scope up a level.

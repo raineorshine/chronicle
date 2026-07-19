@@ -376,9 +376,23 @@ extension Database {
     /// same. Only real (non-null) subtasks are included, so tasks with no
     /// subtasks yield an empty list.
     public func taskSummaries(from: String, to: String) throws -> [TaskSummary] {
+        try taskSummaries(windowFrom: from, windowTo: to,
+                          hoursFrom: from, hoursTo: to)
+    }
+
+    /// Like `taskSummaries(from:to:)` but with the *list membership* range
+    /// (`[windowFrom, windowTo]`) decoupled from the *hours* range
+    /// (`[hoursFrom, hoursTo]`). Every task/subtask that appears anywhere in the
+    /// window is listed, but its hours count only the rows within the hours
+    /// range (a subset of the window). Ranking uses those counted hours, so
+    /// activities with no time in the hours range surface at the bottom
+    /// (alphabetically) with `0` hours. Drives a sidebar that lists the window's
+    /// activities while tallying only the current week.
+    public func taskSummaries(windowFrom: String, windowTo: String,
+                              hoursFrom: String, hoursTo: String) throws -> [TaskSummary] {
         let sql = """
         SELECT task_key, MAX(task_label), subtask_key, MAX(subtask_label),
-               SUM(duration_seconds)
+               SUM(CASE WHEN date >= ? AND date <= ? THEN duration_seconds ELSE 0 END)
         FROM daily_time
         WHERE date >= ? AND date <= ?
         GROUP BY task_key, subtask_key
@@ -386,8 +400,10 @@ extension Database {
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
-        bindText(stmt, 1, from)
-        bindText(stmt, 2, to)
+        bindText(stmt, 1, hoursFrom)
+        bindText(stmt, 2, hoursTo)
+        bindText(stmt, 3, windowFrom)
+        bindText(stmt, 4, windowTo)
 
         struct Acc {
             var label: String

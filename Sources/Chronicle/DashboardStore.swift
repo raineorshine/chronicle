@@ -91,6 +91,12 @@ final class DashboardStore: ObservableObject {
         return (f.string(from: fromDate), f.string(from: today))
     }
 
+    /// Inclusive `yyyy-MM-dd` bounds covering the current (in-progress) week,
+    /// from its Monday start up to today.
+    var currentWeekBounds: (from: String, to: String) {
+        (currentWeekStart, dateBounds.to)
+    }
+
     // MARK: - Scope -> query dimension
 
     /// The segment dimension and the scope filter for the current selection:
@@ -135,7 +141,10 @@ final class DashboardStore: ObservableObject {
                                               from: bounds.from, to: bounds.to)
         stacks = WeeklyBucketing.bucket(daily, calendar: calendar, topN: 8)
         segmentStyles = Self.styles(for: stacks.segments)
-        taskList = try db.taskSummaries(from: bounds.from, to: bounds.to)
+        // Sidebar lists the window's activities but tallies only the current week.
+        let week = currentWeekBounds
+        taskList = try db.taskSummaries(windowFrom: bounds.from, windowTo: bounds.to,
+                                        hoursFrom: week.from, hoursTo: week.to)
         totals = try db.totals(selection: selection, from: bounds.from, to: bounds.to)
     }
 
