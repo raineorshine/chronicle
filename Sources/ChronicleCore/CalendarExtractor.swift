@@ -75,7 +75,13 @@ public final class CalendarExtractor {
 
         let all = store.calendars(for: .event)
         let allow = Set(config.calendarAllowlist.map(Self.normalize))
-        let included = all.filter { allow.contains(Self.normalize($0.title)) }
+        let subtractive = Set(config.subtractiveCalendars.map(Self.normalize))
+        // Subtractive calendars are always extracted so they can subtract (and
+        // their own time counts), even when not explicitly in the allowlist.
+        let included = all.filter {
+            let key = Self.normalize($0.title)
+            return allow.contains(key) || subtractive.contains(key)
+        }
 
         var inputs: [EventInput] = []
         if !included.isEmpty {
@@ -87,12 +93,14 @@ public final class CalendarExtractor {
                 guard let start = event.startDate, let end = event.endDate else { continue }
                 guard let parsed = TitleParser.parse(event.title ?? "",
                                                      separator: config.subtaskSeparator) else { continue }
+                let isSubtractive = subtractive.contains(Self.normalize(event.calendar.title))
                 inputs.append(EventInput(calendar: TitleParser.normalize(event.calendar.title),
                                          title: parsed,
                                          start: start,
                                          end: end,
                                          isAllDay: false,
-                                         calendarColor: Self.hexString(from: event.calendar.cgColor)))
+                                         calendarColor: Self.hexString(from: event.calendar.cgColor),
+                                         isSubtractive: isSubtractive))
             }
         }
 

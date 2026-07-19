@@ -5,6 +5,7 @@ import ChronicleCore
 
 struct ContentView: View {
     @StateObject private var store = DashboardStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationSplitView {
@@ -14,6 +15,11 @@ struct ContentView: View {
             DashboardDetail(store: store)
         }
         .onAppear { store.load() }
+        .onChange(of: scenePhase) { _, phase in
+            // Re-check when returning to the app (e.g. after granting access in
+            // System Settings) so the picker refreshes without a restart.
+            if phase == .active { store.refreshCalendarAccessState() }
+        }
     }
 }
 
@@ -24,46 +30,27 @@ private struct HierarchySidebar: View {
 
     var body: some View {
         List {
-            SelectableRow(title: "All Calendars",
+            SelectableRow(title: "All Tasks",
                           isSelected: store.selectedNodeID == "all",
                           systemImage: "square.grid.2x2") {
                 store.select(.all, nodeID: "all")
             }
 
-            ForEach(store.calendars) { cal in
-                CalendarDisclosure(store: store, calendar: cal)
+            ForEach(store.taskList) { task in
+                TaskRow(store: store, task: task)
             }
         }
         .listStyle(.sidebar)
     }
 }
 
-private struct CalendarDisclosure: View {
+/// One task in the flat, hours-sorted list. Expands to its merged subtasks when
+/// it has any; otherwise it's a single selectable row.
+private struct TaskRow: View {
     @ObservedObject var store: DashboardStore
-    let calendar: CalendarNode
+    let task: TaskSummary
 
-    var body: some View {
-        DisclosureGroup {
-            ForEach(calendar.tasks) { task in
-                TaskDisclosure(store: store, calendarKey: calendar.key, task: task)
-            }
-        } label: {
-            SelectableRow(title: calendar.label,
-                          isSelected: store.selectedNodeID == "cal:\(calendar.key)",
-                          systemImage: "calendar") {
-                store.select(HierarchySelection(calendarKey: calendar.key),
-                             nodeID: "cal:\(calendar.key)")
-            }
-        }
-    }
-}
-
-private struct TaskDisclosure: View {
-    @ObservedObject var store: DashboardStore
-    let calendarKey: String
-    let task: TaskNode
-
-    private var nodeID: String { "task:\(calendarKey):\(task.key)" }
+    private var nodeID: String { "task:\(task.key)" }
 
     var body: some View {
         Group {
@@ -72,13 +59,13 @@ private struct TaskDisclosure: View {
             } else {
                 DisclosureGroup {
                     ForEach(task.subtasks) { sub in
-                        let subID = "sub:\(calendarKey):\(task.key):\(sub.key)"
+                        let subID = "sub:\(task.key):\(sub.key)"
                         SelectableRow(title: sub.label,
                                       isSelected: store.selectedNodeID == subID,
                                       systemImage: "circle.fill",
-                                      indent: 1) {
-                            store.select(HierarchySelection(calendarKey: calendarKey,
-                                                            taskKey: task.key,
+                                      indent: 1,
+                                      detail: Self.hours(sub.hours)) {
+                            store.select(HierarchySelection(taskKey: task.key,
                                                             subtaskKey: sub.key),
                                          nodeID: subID)
                         }
@@ -91,10 +78,14 @@ private struct TaskDisclosure: View {
     private var taskRow: some View {
         SelectableRow(title: task.label,
                       isSelected: store.selectedNodeID == nodeID,
-                      systemImage: "list.bullet") {
-            store.select(HierarchySelection(calendarKey: calendarKey, taskKey: task.key),
-                         nodeID: nodeID)
+                      systemImage: "list.bullet",
+                      detail: Self.hours(task.hours)) {
+            store.select(HierarchySelection(taskKey: task.key), nodeID: nodeID)
         }
+    }
+
+    private static func hours(_ h: Double) -> String {
+        String(format: "%.1fh", h)
     }
 }
 
@@ -103,6 +94,7 @@ private struct SelectableRow: View {
     let isSelected: Bool
     let systemImage: String
     var indent: Int = 0
+    var detail: String? = nil
     let action: () -> Void
 
     var body: some View {
@@ -113,7 +105,13 @@ private struct SelectableRow: View {
                     .foregroundStyle(.secondary)
                 Text(title)
                     .lineLimit(1)
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.leading, CGFloat(indent) * 12)
             .contentShape(Rectangle())
@@ -179,12 +177,11 @@ private struct DashboardDetail: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
-            LatestWeekMetric(store: store)
         }
     }
 
     private var selectionTitle: String {
-        store.selectedNodeID == "all" ? "All Calendars" : store.currentTitle
+        store.selectedNodeID == "all" ? "All Tasks" : store.currentTitle
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -264,9 +261,12 @@ private struct CalendarPicker: View {
                 .frame(maxHeight: 360)
 
                 Divider()
-                Text("Selected calendars are included in your metrics.")
+                Text("Selected calendars are included in your metrics. The "
+                     + "minus icon marks a calendar subtractive — its time is "
+                     + "removed from overlapping events in other calendars.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
             }
@@ -276,11 +276,22 @@ private struct CalendarPicker: View {
 
     private var accessRequestView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Chronicle needs access to your calendars to list them here.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Button("Grant Calendar Access") {
-                store.loadCalendars()
+            if store.calendarAccessDenied {
+                Text("Calendar access is turned off for Chronicle. Enable it in "
+                     + "System Settings › Privacy & Security › Calendars, then "
+                     + "return here.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Button("Open System Settings") {
+                    store.openCalendarSettings()
+                }
+            } else {
+                Text("Chronicle needs access to your calendars to list them here.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Button("Grant Calendar Access") {
+                    store.requestCalendarAccess()
+                }
             }
         }
         .padding(14)
@@ -291,20 +302,39 @@ private struct CalendarPickerRow: View {
     @ObservedObject var store: DashboardStore
     let calendar: CalendarInfo
 
+    private var isSubtractive: Bool { store.isCalendarSubtractive(calendar) }
+
     var body: some View {
-        Toggle(isOn: Binding(
-            get: { store.isCalendarSelected(calendar) },
-            set: { store.setCalendar(calendar, included: $0) }
-        )) {
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color(hex: calendar.colorHex) ?? .secondary)
-                    .frame(width: 12, height: 12)
-                Text(calendar.title)
-                    .lineLimit(1)
+        HStack(spacing: 8) {
+            Toggle(isOn: Binding(
+                get: { store.isCalendarSelected(calendar) },
+                set: { store.setCalendar(calendar, included: $0) }
+            )) {
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color(hex: calendar.colorHex) ?? .secondary)
+                        .frame(width: 12, height: 12)
+                    Text(calendar.title)
+                        .lineLimit(1)
+                }
             }
+            .toggleStyle(.checkbox)
+
+            Spacer(minLength: 4)
+
+            Button {
+                store.setSubtractive(calendar, subtractive: !isSubtractive)
+            } label: {
+                Image(systemName: isSubtractive ? "minus.circle.fill" : "minus.circle")
+                    .foregroundStyle(isSubtractive ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help(isSubtractive
+                  ? "Subtractive: this calendar's time is removed from overlapping "
+                    + "events in other calendars. Click to turn off."
+                  : "Mark subtractive: remove this calendar's time from overlapping "
+                    + "events in other calendars (also includes it).")
         }
-        .toggleStyle(.checkbox)
         .padding(.horizontal, 14)
         .padding(.vertical, 3)
     }
@@ -322,29 +352,6 @@ extension Color {
             green: Double((value >> 8) & 0xFF) / 255.0,
             blue: Double(value & 0xFF) / 255.0
         )
-    }
-}
-
-/// The latest week's hours plus a colored delta chip versus the prior week.
-private struct LatestWeekMetric: View {
-    @ObservedObject var store: DashboardStore
-
-    var body: some View {
-        let latest = store.latestWeek
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(String(format: "%.1f", latest.hours))
-                .font(.title).monospacedDigit().bold()
-            HStack(spacing: 6) {
-                Text("This week").font(.caption).foregroundStyle(.secondary)
-                if let delta = latest.delta, abs(delta) >= 0.05 {
-                    let up = delta > 0
-                    Text("\(up ? "▲" : "▼") \(String(format: "%.1f", abs(delta)))h")
-                        .font(.caption).monospacedDigit()
-                        .foregroundStyle(up ? Color.green : Color.red)
-                        .help("Change versus the previous week")
-                }
-            }
-        }
     }
 }
 
@@ -401,7 +408,7 @@ private struct WeeklyChartCard: View {
                 y: .value("Hours", point.hours)
             )
             .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
-            .opacity(point.weekStart == store.currentWeekStart ? 0.55 : 1.0)
+            .opacity(1.0)
         }
         .chartForegroundStyleScale(domain: store.styleDomain, range: store.styleRange)
         .chartXScale(domain: store.windowWeekStarts)

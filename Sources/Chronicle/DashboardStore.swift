@@ -1,5 +1,7 @@
 import Foundation
 import SwiftUI
+import AppKit
+import EventKit
 import ChronicleCore
 
 /// Observable state backing the dashboard: hierarchy tree, current scope
@@ -7,13 +9,14 @@ import ChronicleCore
 /// read from SQLite.
 @MainActor
 final class DashboardStore: ObservableObject {
-    @Published var calendars: [CalendarNode] = []
+    /// Flat, hours-sorted task list (merged across calendars) for the sidebar.
+    @Published var taskList: [TaskSummary] = []
     @Published var selection: HierarchySelection = .all
     @Published var selectedNodeID: String = "all"
 
     /// Number of trailing weeks shown on the X axis (includes the current,
     /// in-progress week). One of `allowedWeekWindows`.
-    @Published var weeksWindow: Int = 8
+    @Published var weeksWindow: Int = 4
 
     /// Bucketed weekly stacks for the current scope + window.
     @Published var stacks: WeeklyStacks = .empty
@@ -31,11 +34,17 @@ final class DashboardStore: ObservableObject {
     @Published var availableCalendars: [CalendarInfo] = []
     /// Whether Calendar access has been granted.
     @Published var hasCalendarAccess = false
+    /// True when access was explicitly denied/restricted, so the system prompt
+    /// can no longer be shown and the user must grant access in System Settings.
+    @Published var calendarAccessDenied = false
     /// True while calendars are being loaded / access requested.
     @Published var isLoadingCalendars = false
 
     /// Normalized titles of calendars currently included (mirrors config allowlist).
     private var allowedTitleKeys: Set<String> = []
+
+    /// Normalized titles of calendars currently marked subtractive.
+    private var subtractiveTitleKeys: Set<String> = []
 
     /// Week boundaries always start on Monday, independent of the locale's
     /// default first weekday.
@@ -82,16 +91,21 @@ final class DashboardStore: ObservableObject {
         return (f.string(from: fromDate), f.string(from: today))
     }
 
+    /// Inclusive `yyyy-MM-dd` bounds covering the current (in-progress) week,
+    /// from its Monday start up to today.
+    var currentWeekBounds: (from: String, to: String) {
+        (currentWeekStart, dateBounds.to)
+    }
+
     // MARK: - Scope -> query dimension
 
     /// The segment dimension and the scope filter for the current selection:
     /// a task/subtask selection breaks down by Subtask; otherwise by Task.
     private var queryPlan: (dimension: SegmentDimension, scope: HierarchySelection) {
-        if selection.taskKey != nil {
-            return (.subtask, HierarchySelection(calendarKey: selection.calendarKey,
-                                                 taskKey: selection.taskKey))
+        if let taskKey = selection.taskKey {
+            return (.subtask, HierarchySelection(taskKey: taskKey))
         }
-        return (.task, HierarchySelection(calendarKey: selection.calendarKey))
+        return (.task, .all)
     }
 
     // MARK: - Loading
@@ -100,16 +114,14 @@ final class DashboardStore: ObservableObject {
         syncSelectionFromConfig()
         do {
             let db = try openDatabase()
-            calendars = try db.hierarchy()
             try reload(using: db)
             errorMessage = nil
         } catch {
             errorMessage = "\(error)"
         }
-        // If access was already granted, populate the picker without prompting.
-        if CalendarExtractor.authorizationStatus == .fullAccess {
-            loadCalendars()
-        }
+        // Reflect the current authorization state and, if already granted,
+        // populate the picker without prompting.
+        refreshCalendarAccessState()
     }
 
     func reloadData() {
@@ -128,7 +140,11 @@ final class DashboardStore: ObservableObject {
                                               dimension: plan.dimension,
                                               from: bounds.from, to: bounds.to)
         stacks = WeeklyBucketing.bucket(daily, calendar: calendar, topN: 8)
-        segmentStyles = Self.styles(for: stacks.segments, calendars: calendars)
+        segmentStyles = Self.styles(for: stacks.segments)
+        // Sidebar lists the window's activities but tallies only the current week.
+        let week = currentWeekBounds
+        taskList = try db.taskSummaries(windowFrom: bounds.from, windowTo: bounds.to,
+                                        hoursFrom: week.from, hoursTo: week.to)
         totals = try db.totals(selection: selection, from: bounds.from, to: bounds.to)
     }
 
@@ -201,14 +217,6 @@ final class DashboardStore: ObservableObject {
         return byWeek.keys.sorted().map { ($0, byWeek[$0] ?? 0) }
     }
 
-    /// Hours logged in the most recent week and the delta versus the prior week.
-    var latestWeek: (hours: Double, delta: Double?) {
-        let totals = weekTotals
-        guard let last = totals.last else { return (0, nil) }
-        let prior = totals.count >= 2 ? totals[totals.count - 2].hours : nil
-        return (last.hours, prior.map { last.hours - $0 })
-    }
-
     // MARK: - Segment styling
 
     /// A distinct chart segment resolved to a unique display label and a color.
@@ -227,17 +235,10 @@ final class DashboardStore: ObservableObject {
         Color(hex: "#BAB0AC")!
     ]
 
-    /// Resolves segments to unique display labels + palette colors. Duplicate
-    /// labels (e.g. same task name in two calendars) are disambiguated with the
-    /// calendar name so the legend and color scale stay unambiguous.
-    private static func styles(for segments: [WeeklySegment],
-                               calendars: [CalendarNode]) -> [SegmentStyle] {
-        let calendarLabel = Dictionary(uniqueKeysWithValues:
-            calendars.map { ($0.key, $0.label) })
-
-        var labelCounts: [String: Int] = [:]
-        for s in segments where !s.isOther { labelCounts[s.label, default: 0] += 1 }
-
+    /// Resolves segments to unique display labels + palette colors. Task and
+    /// subtask keys are calendar-agnostic (merged cross-calendar), so labels are
+    /// used directly; a generic collision guard keeps the legend unambiguous.
+    private static func styles(for segments: [WeeklySegment]) -> [SegmentStyle] {
         var used: Set<String> = []
         var paletteIndex = 0
         return segments.map { segment in
@@ -249,15 +250,9 @@ final class DashboardStore: ObservableObject {
                 paletteIndex += 1
             }
 
-            var label = segment.label
-            if !segment.isOther, (labelCounts[segment.label] ?? 0) > 1 {
-                let calKey = segment.key.split(separator: "\u{1F}").first.map(String.init) ?? ""
-                if let cal = calendarLabel[calKey] { label = "\(segment.label) · \(cal)" }
-            }
-            // Guard against any remaining collisions.
-            var unique = label
+            var unique = segment.label
             var n = 2
-            while used.contains(unique) { unique = "\(label) (\(n))"; n += 1 }
+            while used.contains(unique) { unique = "\(segment.label) (\(n))"; n += 1 }
             used.insert(unique)
 
             return SegmentStyle(key: segment.key, displayLabel: unique, color: color)
@@ -268,22 +263,16 @@ final class DashboardStore: ObservableObject {
 
     /// A human-readable path for the current selection, derived from labels.
     var currentTitle: String {
-        let parts = selectedNodeID.split(separator: ":").map(String.init)
-        guard let kind = parts.first else { return "All Calendars" }
-        switch kind {
-        case "cal" where parts.count >= 2:
-            return calendars.first { $0.key == parts[1] }?.label ?? "Calendar"
-        case "task" where parts.count >= 3:
-            let cal = calendars.first { $0.key == parts[1] }
-            let task = cal?.tasks.first { $0.key == parts[2] }
-            return [cal?.label, task?.label].compactMap { $0 }.joined(separator: " / ")
-        case "sub" where parts.count >= 4:
-            let cal = calendars.first { $0.key == parts[1] }
-            let task = cal?.tasks.first { $0.key == parts[2] }
-            let sub = task?.subtasks.first { $0.key == parts[3] }
-            return [cal?.label, task?.label, sub?.label].compactMap { $0 }.joined(separator: " / ")
-        default:
-            return "All Calendars"
+        switch selection.taskKey {
+        case .none:
+            return "All Tasks"
+        case .some(let taskKey):
+            let task = taskList.first { $0.key == taskKey }
+            guard let subKey = selection.subtaskKey else {
+                return task?.label ?? "Task"
+            }
+            let sub = task?.subtasks.first { $0.key == subKey }
+            return [task?.label, sub?.label].compactMap { $0 }.joined(separator: " / ")
         }
     }
 
@@ -298,28 +287,19 @@ final class DashboardStore: ObservableObject {
     var isTaskLevel: Bool { selection.taskKey == nil }
 
     /// Drills into an activity segment so the chart re-stacks it by subtask.
-    /// No-op for the "Other" bucket or when already at subtask level.
+    /// No-op for the "Other" bucket or when already at subtask level. The
+    /// segment key is the (calendar-agnostic) task key.
     func drillInto(segmentKey key: String) {
         guard isTaskLevel, key != WeeklyBucketing.otherKey else { return }
-        let parts = key.split(separator: "\u{1F}").map(String.init)
-        guard parts.count == 2 else { return }
-        select(HierarchySelection(calendarKey: parts[0], taskKey: parts[1]),
-               nodeID: "task:\(parts[0]):\(parts[1])")
+        select(HierarchySelection(taskKey: key), nodeID: "task:\(key)")
     }
 
-    /// Moves the scope up one level (subtask → task → calendar → all).
+    /// Moves the scope up one level (subtask → task → all).
     func drillUp() {
-        let parts = selectedNodeID.split(separator: ":").map(String.init)
-        switch parts.first {
-        case "sub" where parts.count >= 3:
-            select(HierarchySelection(calendarKey: parts[1], taskKey: parts[2]),
-                   nodeID: "task:\(parts[1]):\(parts[2])")
-        case "task" where parts.count >= 2:
-            select(HierarchySelection(calendarKey: parts[1]), nodeID: "cal:\(parts[1])")
-        case "cal":
+        if selection.subtaskKey != nil, let taskKey = selection.taskKey {
+            select(HierarchySelection(taskKey: taskKey), nodeID: "task:\(taskKey)")
+        } else if selection.taskKey != nil {
             select(.all, nodeID: "all")
-        default:
-            break
         }
     }
 
@@ -353,6 +333,7 @@ final class DashboardStore: ObservableObject {
     private func syncSelectionFromConfig() {
         if let config = try? ChronicleConfig.load() {
             allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
+            subtractiveTitleKeys = Set(config.subtractiveCalendars.map(Self.normalizeTitle))
         }
     }
 
@@ -360,7 +341,49 @@ final class DashboardStore: ObservableObject {
         allowedTitleKeys.contains(Self.normalizeTitle(info.title))
     }
 
+    func isCalendarSubtractive(_ info: CalendarInfo) -> Bool {
+        subtractiveTitleKeys.contains(Self.normalizeTitle(info.title))
+    }
+
     var selectedCalendarCount: Int { allowedTitleKeys.count }
+
+    /// Called when the app becomes active (e.g. returning from System Settings)
+    /// and on launch. Re-reads the live authorization status so the picker
+    /// updates itself after the user grants access outside the app.
+    func refreshCalendarAccessState() {
+        switch CalendarExtractor.authorizationStatus {
+        case .fullAccess:
+            calendarAccessDenied = false
+            // Populate (or re-populate) the picker without prompting.
+            if availableCalendars.isEmpty { loadCalendars() }
+        case .denied, .restricted:
+            // Keep any calendars we already loaded, but surface the denial so
+            // the button can route the user to System Settings.
+            if !hasCalendarAccess { calendarAccessDenied = true }
+        default: // .notDetermined
+            calendarAccessDenied = false
+        }
+    }
+
+    /// Backs the "Grant Calendar Access" button. `requestFullAccessToEvents()`
+    /// only shows the system prompt when the status is `.notDetermined`; once a
+    /// user has denied access it returns `false` without any UI. In that case we
+    /// send them straight to the Calendars pane in System Settings instead of
+    /// silently failing.
+    func requestCalendarAccess() {
+        switch CalendarExtractor.authorizationStatus {
+        case .denied, .restricted:
+            openCalendarSettings()
+        default: // .notDetermined prompts; .fullAccess just loads.
+            loadCalendars()
+        }
+    }
+
+    /// Opens System Settings › Privacy & Security › Calendars.
+    func openCalendarSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
+        if let url { NSWorkspace.shared.open(url) }
+    }
 
     /// Requests Calendar access (prompting if needed) and loads the calendar
     /// list for the picker. Safe to call repeatedly.
@@ -375,6 +398,7 @@ final class DashboardStore: ObservableObject {
                 await MainActor.run {
                     self.availableCalendars = cals
                     self.hasCalendarAccess = true
+                    self.calendarAccessDenied = false
                     self.isLoadingCalendars = false
                     self.errorMessage = nil
                 }
@@ -382,6 +406,8 @@ final class DashboardStore: ObservableObject {
                 await MainActor.run {
                     self.isLoadingCalendars = false
                     self.hasCalendarAccess = false
+                    self.calendarAccessDenied =
+                        CalendarExtractor.authorizationStatus != .notDetermined
                     self.errorMessage = "\(error)"
                 }
             }
@@ -389,19 +415,49 @@ final class DashboardStore: ObservableObject {
     }
 
     /// Includes/excludes a calendar, persists the allowlist, and re-extracts.
+    /// Removing a calendar also clears any subtractive designation.
     func setCalendar(_ info: CalendarInfo, included: Bool) {
         do {
             var config = try ChronicleConfig.load()
             let key = Self.normalizeTitle(info.title)
             config.calendarAllowlist.removeAll { Self.normalizeTitle($0) == key }
-            if included { config.calendarAllowlist.append(info.title) }
-            try config.save()
-            allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
-            objectWillChange.send()
-            refresh()
+            if included {
+                config.calendarAllowlist.append(info.title)
+            } else {
+                config.subtractiveCalendars.removeAll { Self.normalizeTitle($0) == key }
+            }
+            try persist(config)
         } catch {
             errorMessage = "\(error)"
         }
+    }
+
+    /// Marks a calendar subtractive (or not). Marking subtractive auto-includes
+    /// it, since a subtractive calendar's own time is still counted.
+    func setSubtractive(_ info: CalendarInfo, subtractive: Bool) {
+        do {
+            var config = try ChronicleConfig.load()
+            let key = Self.normalizeTitle(info.title)
+            config.subtractiveCalendars.removeAll { Self.normalizeTitle($0) == key }
+            if subtractive {
+                config.subtractiveCalendars.append(info.title)
+                if !config.calendarAllowlist.contains(where: { Self.normalizeTitle($0) == key }) {
+                    config.calendarAllowlist.append(info.title)
+                }
+            }
+            try persist(config)
+        } catch {
+            errorMessage = "\(error)"
+        }
+    }
+
+    /// Saves the config, refreshes local mirrors, and re-extracts.
+    private func persist(_ config: ChronicleConfig) throws {
+        try config.save()
+        allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
+        subtractiveTitleKeys = Set(config.subtractiveCalendars.map(Self.normalizeTitle))
+        objectWillChange.send()
+        refresh()
     }
 
     // MARK: - Refresh (extracts from Calendar in-process)

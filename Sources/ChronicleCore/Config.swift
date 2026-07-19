@@ -9,6 +9,12 @@ public struct ChronicleConfig: Codable, Equatable {
     /// The only substring treated as a Task/Subtask separator.
     public var subtaskSeparator: String
 
+    /// Calendar display names (as shown in Apple Calendar) treated as
+    /// *subtractive*: their overlap is removed from events in other calendars,
+    /// while their own time is still counted in full. Matched case-insensitively.
+    /// A subtractive calendar is always extracted, even if not in the allowlist.
+    public var subtractiveCalendars: [String]
+
     /// Rolling window: how many days into the past to rebuild.
     public var windowPastDays: Int
 
@@ -17,15 +23,34 @@ public struct ChronicleConfig: Codable, Equatable {
 
     public init(calendarAllowlist: [String] = [],
                 subtaskSeparator: String = " - ",
+                subtractiveCalendars: [String] = [],
                 windowPastDays: Int = 60,
                 windowFutureDays: Int = 14) {
         self.calendarAllowlist = calendarAllowlist
         self.subtaskSeparator = subtaskSeparator
+        self.subtractiveCalendars = subtractiveCalendars
         self.windowPastDays = windowPastDays
         self.windowFutureDays = windowFutureDays
     }
 
     public static let `default` = ChronicleConfig()
+
+    private enum CodingKeys: String, CodingKey {
+        case calendarAllowlist, subtaskSeparator, subtractiveCalendars
+        case windowPastDays, windowFutureDays
+    }
+
+    /// Tolerant decoding so configs written by older versions (which lack the
+    /// newer keys) still load, falling back to defaults for any missing field.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = ChronicleConfig.default
+        calendarAllowlist = try c.decodeIfPresent([String].self, forKey: .calendarAllowlist) ?? d.calendarAllowlist
+        subtaskSeparator = try c.decodeIfPresent(String.self, forKey: .subtaskSeparator) ?? d.subtaskSeparator
+        subtractiveCalendars = try c.decodeIfPresent([String].self, forKey: .subtractiveCalendars) ?? d.subtractiveCalendars
+        windowPastDays = try c.decodeIfPresent(Int.self, forKey: .windowPastDays) ?? d.windowPastDays
+        windowFutureDays = try c.decodeIfPresent(Int.self, forKey: .windowFutureDays) ?? d.windowFutureDays
+    }
 
     /// Loads config from disk. If the file is missing, writes and returns the
     /// default so the user has a template to edit.

@@ -35,19 +35,24 @@ public struct EventInput {
     public let isAllDay: Bool
     /// The source calendar's display color as `#RRGGBB`, if known.
     public let calendarColor: String?
+    /// When true, this event belongs to a *subtractive* calendar: its overlap is
+    /// removed from every non-subtractive event, while its own time counts fully.
+    public let isSubtractive: Bool
 
     public init(calendar: NormalizedName,
                 title: ParsedTitle,
                 start: Date,
                 end: Date,
                 isAllDay: Bool,
-                calendarColor: String? = nil) {
+                calendarColor: String? = nil,
+                isSubtractive: Bool = false) {
         self.calendar = calendar
         self.title = title
         self.start = start
         self.end = end
         self.isAllDay = isAllDay
         self.calendarColor = calendarColor
+        self.isSubtractive = isSubtractive
     }
 }
 

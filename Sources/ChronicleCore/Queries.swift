@@ -89,6 +89,39 @@ public struct RangeTotals: Equatable {
     public static let zero = RangeTotals(totalHours: 0, occurrences: 0)
 }
 
+// MARK: - Flat task list (for the selector)
+
+/// A subtask's total hours over a window, merged across calendars.
+public struct SubtaskSummary: Identifiable, Equatable {
+    public let key: String
+    public let label: String
+    public let hours: Double
+    public var id: String { key }
+
+    public init(key: String, label: String, hours: Double) {
+        self.key = key
+        self.label = label
+        self.hours = hours
+    }
+}
+
+/// A task's total hours over a window, merged across calendars, with its
+/// (also merged) subtasks. Drives the flat, hours-sorted sidebar.
+public struct TaskSummary: Identifiable, Equatable {
+    public let key: String
+    public let label: String
+    public let hours: Double
+    public var subtasks: [SubtaskSummary]
+    public var id: String { key }
+
+    public init(key: String, label: String, hours: Double, subtasks: [SubtaskSummary]) {
+        self.key = key
+        self.label = label
+        self.hours = hours
+        self.subtasks = subtasks
+    }
+}
+
 // MARK: - Hierarchy tree (for the selector)
 
 public struct SubtaskNode: Identifiable, Equatable {
@@ -228,10 +261,10 @@ extension Database {
         switch dimension {
         case .task:
             sql = """
-            SELECT date, calendar_key, task_key, MAX(task_label), SUM(duration_seconds)
+            SELECT date, task_key, MAX(task_label), SUM(duration_seconds)
             FROM daily_time
             WHERE \(whereSQL)
-            GROUP BY date, calendar_key, task_key
+            GROUP BY date, task_key
             ORDER BY date;
             """
         case .subtask:
@@ -257,11 +290,10 @@ extension Database {
             let seconds: Int64
             switch dimension {
             case .task:
-                let calKey = columnText(stmt, 1) ?? ""
-                let taskKey = columnText(stmt, 2) ?? ""
-                key = "\(calKey)\u{1F}\(taskKey)"
-                label = columnText(stmt, 3) ?? taskKey
-                seconds = sqlite3_column_int64(stmt, 4)
+                let taskKey = columnText(stmt, 1) ?? ""
+                key = taskKey
+                label = columnText(stmt, 2) ?? taskKey
+                seconds = sqlite3_column_int64(stmt, 3)
             case .subtask:
                 let subKey = columnText(stmt, 1)
                 key = subKey ?? SegmentDailyPoint.noSubtaskKey
@@ -334,5 +366,89 @@ extension Database {
             node.colorHex = calendarColor[calKey]
             return node
         }
+    }
+
+    // MARK: Flat task list
+
+    /// Tasks over `[from, to]` (inclusive), merged across calendars by
+    /// `task_key`, each with its (also cross-calendar-merged) subtasks. Tasks
+    /// are sorted by total hours descending (tie-break by label); subtasks the
+    /// same. Only real (non-null) subtasks are included, so tasks with no
+    /// subtasks yield an empty list.
+    public func taskSummaries(from: String, to: String) throws -> [TaskSummary] {
+        try taskSummaries(windowFrom: from, windowTo: to,
+                          hoursFrom: from, hoursTo: to)
+    }
+
+    /// Like `taskSummaries(from:to:)` but with the *list membership* range
+    /// (`[windowFrom, windowTo]`) decoupled from the *hours* range
+    /// (`[hoursFrom, hoursTo]`). Every task/subtask that appears anywhere in the
+    /// window is listed, but its hours count only the rows within the hours
+    /// range (a subset of the window). Ranking uses those counted hours, so
+    /// activities with no time in the hours range surface at the bottom
+    /// (alphabetically) with `0` hours. Drives a sidebar that lists the window's
+    /// activities while tallying only the current week.
+    public func taskSummaries(windowFrom: String, windowTo: String,
+                              hoursFrom: String, hoursTo: String) throws -> [TaskSummary] {
+        let sql = """
+        SELECT task_key, MAX(task_label), subtask_key, MAX(subtask_label),
+               SUM(CASE WHEN date >= ? AND date <= ? THEN duration_seconds ELSE 0 END)
+        FROM daily_time
+        WHERE date >= ? AND date <= ?
+        GROUP BY task_key, subtask_key
+        ORDER BY task_key;
+        """
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, hoursFrom)
+        bindText(stmt, 2, hoursTo)
+        bindText(stmt, 3, windowFrom)
+        bindText(stmt, 4, windowTo)
+
+        struct Acc {
+            var label: String
+            var hours: Double = 0
+            var subHours: [String: Double] = [:]
+            var subLabels: [String: String] = [:]
+        }
+        var tasks: [String: Acc] = [:]
+        var order: [String] = []
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let taskKey = columnText(stmt, 0) ?? ""
+            let taskLabel = columnText(stmt, 1) ?? taskKey
+            let subKey = columnText(stmt, 2)
+            let subLabel = columnText(stmt, 3)
+            let hours = Double(sqlite3_column_int64(stmt, 4)) / 3600.0
+
+            if tasks[taskKey] == nil {
+                tasks[taskKey] = Acc(label: taskLabel)
+                order.append(taskKey)
+            }
+            tasks[taskKey]?.hours += hours
+            if let subKey {
+                tasks[taskKey]?.subHours[subKey, default: 0] += hours
+                tasks[taskKey]?.subLabels[subKey] = subLabel ?? subKey
+            }
+        }
+
+        let summaries = order.map { key -> TaskSummary in
+            let acc = tasks[key]!
+            let subtasks = acc.subHours.keys
+                .map { SubtaskSummary(key: $0,
+                                      label: acc.subLabels[$0] ?? $0,
+                                      hours: acc.subHours[$0] ?? 0) }
+                .sorted { rankHours($0.hours, $0.label, $1.hours, $1.label) }
+            return TaskSummary(key: key, label: acc.label,
+                               hours: acc.hours, subtasks: subtasks)
+        }
+        return summaries.sorted { rankHours($0.hours, $0.label, $1.hours, $1.label) }
+    }
+
+    /// Orders by hours descending, tie-breaking on label ascending.
+    private func rankHours(_ ha: Double, _ la: String,
+                           _ hb: Double, _ lb: String) -> Bool {
+        if ha != hb { return ha > hb }
+        return la.localizedCaseInsensitiveCompare(lb) == .orderedAscending
     }
 }
