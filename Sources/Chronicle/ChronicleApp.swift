@@ -23,7 +23,7 @@ private struct NavigationCommands: Commands {
     var body: some Commands {
         CommandMenu("Navigate") {
             Button("All Tasks") { store.selectHome() }
-                .keyboardShortcut("0", modifiers: .command)
+                .keyboardShortcut("1", modifiers: .command)
             // Second binding for the same action; a button takes one shortcut.
             Button("All Tasks (Home)") { store.selectHome() }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
@@ -37,9 +37,10 @@ private struct NavigationCommands: Commands {
 
             Divider()
 
-            ForEach(1...9, id: \.self) { n in
+            // Cmd+(N+1) selects the Nth activity, so Cmd+2 -> activity 1 ... Cmd+9 -> activity 8.
+            ForEach(1...8, id: \.self) { n in
                 Button("Activity \(n)") { store.selectActivity(n) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
+                    .keyboardShortcut(KeyEquivalent(Character("\(n + 1)")), modifiers: .command)
             }
         }
     }
