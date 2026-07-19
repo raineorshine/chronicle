@@ -282,6 +282,53 @@ final class DashboardStore: ObservableObject {
         reloadData()
     }
 
+    // MARK: - Keyboard navigation
+
+    /// Ordered node IDs the ⌘←/⌘→ shortcuts step through: the "All Tasks" home
+    /// row followed by each top-level activity (subtasks are excluded).
+    private var navigableNodeIDs: [String] {
+        ["all"] + taskList.map { "task:\($0.key)" }
+    }
+
+    /// Selects the "All Tasks" home scope (⌘0 / ⌘⇧H).
+    func selectHome() {
+        select(.all, nodeID: "all")
+    }
+
+    /// Selects the Nth top-level activity (1-based, matching ⌘1…⌘9). No-op when
+    /// fewer than `oneBasedIndex` activities exist.
+    func selectActivity(_ oneBasedIndex: Int) {
+        let idx = oneBasedIndex - 1
+        guard taskList.indices.contains(idx) else { return }
+        let task = taskList[idx]
+        select(HierarchySelection(taskKey: task.key), nodeID: "task:\(task.key)")
+    }
+
+    /// Moves the selection ±1 within `navigableNodeIDs`, clamped at the ends. If
+    /// the current selection isn't a navigable row (e.g. a subtask is selected),
+    /// it's treated as its parent activity so prev/next still behave intuitively.
+    func navigateSibling(_ offset: Int) {
+        let ids = navigableNodeIDs
+        guard !ids.isEmpty else { return }
+
+        let currentID: String
+        if selectedNodeID.hasPrefix("sub:"), let taskKey = selection.taskKey {
+            currentID = "task:\(taskKey)"
+        } else {
+            currentID = selectedNodeID
+        }
+
+        let current = ids.firstIndex(of: currentID) ?? 0
+        let target = min(max(current + offset, 0), ids.count - 1)
+        guard target != current else { return }
+
+        if target == 0 {
+            selectHome()
+        } else {
+            selectActivity(target) // target maps 1-based onto taskList
+        }
+    }
+
     /// True when the chart segments each bar by activity (Task), i.e. the top
     /// level or a calendar scope — as opposed to a subtask breakdown.
     var isTaskLevel: Bool { selection.taskKey == nil }

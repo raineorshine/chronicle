@@ -4,7 +4,7 @@ import Charts
 import ChronicleCore
 
 struct ContentView: View {
-    @StateObject private var store = DashboardStore()
+    @ObservedObject var store: DashboardStore
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
