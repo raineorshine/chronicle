@@ -232,19 +232,28 @@ final class DashboardStore: ObservableObject {
     }
 
     /// A curated, Calendar-inspired palette (Apple Calendar's named colors, tuned
-    /// for the app's dark theme). Drives both auto-colors and the manual swatch
-    /// picker, so assigned and hand-picked colors are drawn from the same set.
-    /// The "Other" bucket is gray and not part of this palette.
+    /// for the app's dark theme, plus evenly-spaced in-between hues). Drives both
+    /// auto-colors and the manual swatch picker, so assigned and hand-picked
+    /// colors are drawn from the same set. The "Other" bucket is gray and is
+    /// styled separately.
     static let palette: [Color] = [
         Color(hex: "#FF453A")!, // Red
+        Color(hex: "#FF6B3D")!, // Vermilion
         Color(hex: "#FF9F0A")!, // Orange
+        Color(hex: "#FFBF00")!, // Amber
         Color(hex: "#FFD60A")!, // Yellow
+        Color(hex: "#C0E030")!, // Lime
         Color(hex: "#32D74B")!, // Green
+        Color(hex: "#30E0A1")!, // Mint
         Color(hex: "#40C8E0")!, // Teal
+        Color(hex: "#64D2FF")!, // Cyan
         Color(hex: "#0A84FF")!, // Blue
         Color(hex: "#5E5CE6")!, // Indigo
+        Color(hex: "#7D7AFF")!, // Violet
         Color(hex: "#BF5AF2")!, // Purple
+        Color(hex: "#E85AD1")!, // Magenta
         Color(hex: "#FF375F")!, // Pink
+        Color(hex: "#FF6482")!, // Rose
         Color(hex: "#AC8E68")!, // Brown
         Color(hex: "#98989D")!, // Gray
     ]
