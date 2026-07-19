@@ -177,7 +177,6 @@ private struct DashboardDetail: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
-            LatestWeekMetric(store: store)
         }
     }
 
@@ -353,29 +352,6 @@ extension Color {
             green: Double((value >> 8) & 0xFF) / 255.0,
             blue: Double(value & 0xFF) / 255.0
         )
-    }
-}
-
-/// The latest week's hours plus a colored delta chip versus the prior week.
-private struct LatestWeekMetric: View {
-    @ObservedObject var store: DashboardStore
-
-    var body: some View {
-        let latest = store.latestWeek
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(String(format: "%.1f", latest.hours))
-                .font(.title).monospacedDigit().bold()
-            HStack(spacing: 6) {
-                Text("This week").font(.caption).foregroundStyle(.secondary)
-                if let delta = latest.delta, abs(delta) >= 0.05 {
-                    let up = delta > 0
-                    Text("\(up ? "▲" : "▼") \(String(format: "%.1f", abs(delta)))h")
-                        .font(.caption).monospacedDigit()
-                        .foregroundStyle(up ? Color.green : Color.red)
-                        .help("Change versus the previous week")
-                }
-            }
-        }
     }
 }
 

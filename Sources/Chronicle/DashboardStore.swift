@@ -211,14 +211,6 @@ final class DashboardStore: ObservableObject {
         return byWeek.keys.sorted().map { ($0, byWeek[$0] ?? 0) }
     }
 
-    /// Hours logged in the most recent week and the delta versus the prior week.
-    var latestWeek: (hours: Double, delta: Double?) {
-        let totals = weekTotals
-        guard let last = totals.last else { return (0, nil) }
-        let prior = totals.count >= 2 ? totals[totals.count - 2].hours : nil
-        return (last.hours, prior.map { last.hours - $0 })
-    }
-
     // MARK: - Segment styling
 
     /// A distinct chart segment resolved to a unique display label and a color.
