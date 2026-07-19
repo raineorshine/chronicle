@@ -1,5 +1,7 @@
 import Foundation
 import SwiftUI
+import AppKit
+import EventKit
 import ChronicleCore
 
 /// Observable state backing the dashboard: hierarchy tree, current scope
@@ -31,6 +33,9 @@ final class DashboardStore: ObservableObject {
     @Published var availableCalendars: [CalendarInfo] = []
     /// Whether Calendar access has been granted.
     @Published var hasCalendarAccess = false
+    /// True when access was explicitly denied/restricted, so the system prompt
+    /// can no longer be shown and the user must grant access in System Settings.
+    @Published var calendarAccessDenied = false
     /// True while calendars are being loaded / access requested.
     @Published var isLoadingCalendars = false
 
@@ -106,10 +111,9 @@ final class DashboardStore: ObservableObject {
         } catch {
             errorMessage = "\(error)"
         }
-        // If access was already granted, populate the picker without prompting.
-        if CalendarExtractor.authorizationStatus == .fullAccess {
-            loadCalendars()
-        }
+        // Reflect the current authorization state and, if already granted,
+        // populate the picker without prompting.
+        refreshCalendarAccessState()
     }
 
     func reloadData() {
@@ -340,6 +344,44 @@ final class DashboardStore: ObservableObject {
 
     var selectedCalendarCount: Int { allowedTitleKeys.count }
 
+    /// Called when the app becomes active (e.g. returning from System Settings)
+    /// and on launch. Re-reads the live authorization status so the picker
+    /// updates itself after the user grants access outside the app.
+    func refreshCalendarAccessState() {
+        switch CalendarExtractor.authorizationStatus {
+        case .fullAccess:
+            calendarAccessDenied = false
+            // Populate (or re-populate) the picker without prompting.
+            if availableCalendars.isEmpty { loadCalendars() }
+        case .denied, .restricted:
+            // Keep any calendars we already loaded, but surface the denial so
+            // the button can route the user to System Settings.
+            if !hasCalendarAccess { calendarAccessDenied = true }
+        default: // .notDetermined
+            calendarAccessDenied = false
+        }
+    }
+
+    /// Backs the "Grant Calendar Access" button. `requestFullAccessToEvents()`
+    /// only shows the system prompt when the status is `.notDetermined`; once a
+    /// user has denied access it returns `false` without any UI. In that case we
+    /// send them straight to the Calendars pane in System Settings instead of
+    /// silently failing.
+    func requestCalendarAccess() {
+        switch CalendarExtractor.authorizationStatus {
+        case .denied, .restricted:
+            openCalendarSettings()
+        default: // .notDetermined prompts; .fullAccess just loads.
+            loadCalendars()
+        }
+    }
+
+    /// Opens System Settings › Privacy & Security › Calendars.
+    func openCalendarSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
+        if let url { NSWorkspace.shared.open(url) }
+    }
+
     /// Requests Calendar access (prompting if needed) and loads the calendar
     /// list for the picker. Safe to call repeatedly.
     func loadCalendars() {
@@ -353,6 +395,7 @@ final class DashboardStore: ObservableObject {
                 await MainActor.run {
                     self.availableCalendars = cals
                     self.hasCalendarAccess = true
+                    self.calendarAccessDenied = false
                     self.isLoadingCalendars = false
                     self.errorMessage = nil
                 }
@@ -360,6 +403,8 @@ final class DashboardStore: ObservableObject {
                 await MainActor.run {
                     self.isLoadingCalendars = false
                     self.hasCalendarAccess = false
+                    self.calendarAccessDenied =
+                        CalendarExtractor.authorizationStatus != .notDetermined
                     self.errorMessage = "\(error)"
                 }
             }
