@@ -156,13 +156,38 @@ final class DashboardStore: ObservableObject {
 
     func color(forSegment key: String) -> Color { styleIndex[key]?.color ?? .gray }
 
-    /// A week's segments as (label, color, hours), heaviest first — for tooltips.
-    func segments(inWeek week: String) -> [(label: String, color: Color, hours: Double)] {
-        stacks.points
-            .filter { $0.weekStart == week }
-            .map { (displayLabel(forSegment: $0.segmentKey),
-                    color(forSegment: $0.segmentKey), $0.hours) }
-            .sorted { $0.hours > $1.hours }
+    /// A resolved segment under the cursor, for the granular hover tooltip.
+    struct HoveredSegment: Equatable {
+        let week: String
+        let key: String
+        let label: String
+        let color: Color
+        let hours: Double
+    }
+
+    /// Resolves the stacked segment at `week` whose cumulative band contains the
+    /// hovered hours value `hours` (as read from the chart's Y scale). Walks the
+    /// stack bottom→top in the same order the chart renders (`segmentStyles`
+    /// order, first == bottom). Returns `nil` when the value is below zero, above
+    /// the week's total, or lands on a segment with no hours.
+    func segment(inWeek week: String, atHours hours: Double) -> HoveredSegment? {
+        guard hours >= 0 else { return nil }
+        var hoursByKey: [String: Double] = [:]
+        for p in stacks.points where p.weekStart == week {
+            hoursByKey[p.segmentKey, default: 0] += p.hours
+        }
+        var base = 0.0
+        for style in segmentStyles {
+            let h = hoursByKey[style.key] ?? 0
+            guard h > 0 else { continue }
+            if hours < base + h {
+                return HoveredSegment(week: week, key: style.key,
+                                      label: style.displayLabel,
+                                      color: style.color, hours: h)
+            }
+            base += h
+        }
+        return nil
     }
 
     /// Short axis/tooltip label for a `yyyy-MM-dd` week start, e.g. "Jul 14".
