@@ -160,25 +160,22 @@ final class DashboardStore: ObservableObject {
 
     /// Resolves the stacked segment at `week` whose cumulative band contains the
     /// hovered hours value `hours` (as read from the chart's Y scale). Walks the
-    /// stack bottom→top in the same order the chart renders (`segmentStyles`
-    /// order, first == bottom). Returns `nil` when the value is below zero, above
-    /// the week's total, or lands on a segment with no hours.
+    /// week's points in `stacks.points` order — the exact order the marks are
+    /// drawn by `Chart(store.stacks.points)`, which is how Swift Charts stacks
+    /// them (first point == bottom). Returns `nil` when the value is below zero,
+    /// above the week's total, or lands on a segment with no hours.
     func segment(inWeek week: String, atHours hours: Double) -> HoveredSegment? {
         guard hours >= 0 else { return nil }
-        var hoursByKey: [String: Double] = [:]
-        for p in stacks.points where p.weekStart == week {
-            hoursByKey[p.segmentKey, default: 0] += p.hours
-        }
         var base = 0.0
-        for style in segmentStyles {
-            let h = hoursByKey[style.key] ?? 0
-            guard h > 0 else { continue }
-            if hours < base + h {
-                return HoveredSegment(week: week, key: style.key,
-                                      label: style.displayLabel,
-                                      color: style.color, hours: h)
+        for p in stacks.points where p.weekStart == week {
+            guard p.hours > 0 else { continue }
+            if hours < base + p.hours {
+                return HoveredSegment(week: week, key: p.segmentKey,
+                                      label: displayLabel(forSegment: p.segmentKey),
+                                      color: color(forSegment: p.segmentKey),
+                                      hours: p.hours)
             }
-            base += h
+            base += p.hours
         }
         return nil
     }
