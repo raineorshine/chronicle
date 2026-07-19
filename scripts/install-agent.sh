@@ -6,6 +6,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$REPO_ROOT/scripts"
 SUPPORT_DIR="$HOME/Library/Application Support/Chronicle"
 BIN_DIR="$SUPPORT_DIR/bin"
 LOG_DIR="$SUPPORT_DIR/logs"
@@ -30,7 +31,31 @@ fi
 
 echo "==> Installing binary and directories…"
 mkdir -p "$BIN_DIR" "$LOG_DIR" "$AGENT_DIR"
-cp -f "$BUILT_BIN" "$BIN_DIR/chronicle-extract"
+
+# Match the app's stable code-signing identity so the extractor's Calendar grant
+# also survives rebuilds. If the previously installed binary is ad-hoc signed,
+# clear its stale (hash-pinned) grant once.
+DEST_BIN="$BIN_DIR/chronicle-extract"
+RESET_TCC=false
+if [[ -f "$DEST_BIN" ]] && codesign -dvv "$DEST_BIN" 2>&1 | grep -q "Signature=adhoc"; then
+	RESET_TCC=true
+fi
+
+echo "==> Ensuring a stable code-signing identity…"
+SIGN_IDENTITY="$("$SCRIPT_DIR/create-signing-cert.sh")"
+
+cp -f "$BUILT_BIN" "$DEST_BIN"
+
+echo "==> Signing with \"$SIGN_IDENTITY\"…"
+codesign --force --options runtime \
+	--entitlements "$REPO_ROOT/Extractor/Extractor.entitlements" \
+	--sign "$SIGN_IDENTITY" "$DEST_BIN"
+codesign --verify --strict "$DEST_BIN"
+
+if [[ "$RESET_TCC" == true ]]; then
+	echo "==> Clearing the stale ad-hoc Calendar permission (one-time)…"
+	tccutil reset Calendar "$LABEL" >/dev/null 2>&1 || true
+fi
 
 echo "==> Writing LaunchAgent to $PLIST_DST…"
 sed \
