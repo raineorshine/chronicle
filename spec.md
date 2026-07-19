@@ -137,6 +137,33 @@ Recurring events should **not** be expanded manually.
 Instead, query EventKit for the requested date range and count the
 returned occurrences.
 
+## Subtractive Calendars
+
+Any calendar may be designated **subtractive**. A subtractive calendar
+subtracts its time from any overlapping event in a non-subtractive calendar,
+while its own events are always counted in full — regardless of whether they
+overlap another calendar.
+
+Examples:
+
+    Calendar A:               12–5pm  Swim
+    Calendar B (subtractive):  2–5pm  Instagram
+    ⇒ Swim = 2h (12–2),  Instagram = 3h
+
+    Calendar A:               12–5pm  Swim
+    Calendar B (subtractive):  4–7pm  Instagram
+    ⇒ Swim = 4h (12–4),  Instagram = 3h (counted in full)
+
+Rules:
+
+-   Subtraction is applied at the interval level, before splitting across
+    midnight and bucketing into days. Only `duration_seconds` is affected;
+    occurrence counts are unchanged (one occurrence on the event's start day).
+-   A subtractive calendar subtracts from **all** non-subtractive calendars.
+-   Subtractive calendars do **not** subtract from one another.
+-   A subtractive calendar is always extracted so it can subtract and so its own
+    time is counted, even when not listed in `calendarAllowlist`.
+
 ------------------------------------------------------------------------
 
 # Storage
@@ -291,6 +318,10 @@ Configuration is a JSON file created on first run:
     calendar's color); the app reads and writes this field. Hand-editing is
     optional.
 -   `subtaskSeparator` — defaults to `" - "`.
+-   `subtractiveCalendars` — calendar names (case-insensitive) treated as
+    subtractive (see **Subtractive Calendars**). Managed from the same picker
+    via a per-calendar minus toggle. Marking a calendar subtractive also
+    includes it.
 -   `windowPastDays` / `windowFutureDays` — the rolling window (default 60 / 14).
 
 The SQLite database lives at

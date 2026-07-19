@@ -43,6 +43,9 @@ final class DashboardStore: ObservableObject {
     /// Normalized titles of calendars currently included (mirrors config allowlist).
     private var allowedTitleKeys: Set<String> = []
 
+    /// Normalized titles of calendars currently marked subtractive.
+    private var subtractiveTitleKeys: Set<String> = []
+
     /// Week boundaries always start on Monday, independent of the locale's
     /// default first weekday.
     private let calendar: Calendar = {
@@ -307,11 +310,16 @@ final class DashboardStore: ObservableObject {
     private func syncSelectionFromConfig() {
         if let config = try? ChronicleConfig.load() {
             allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
+            subtractiveTitleKeys = Set(config.subtractiveCalendars.map(Self.normalizeTitle))
         }
     }
 
     func isCalendarSelected(_ info: CalendarInfo) -> Bool {
         allowedTitleKeys.contains(Self.normalizeTitle(info.title))
+    }
+
+    func isCalendarSubtractive(_ info: CalendarInfo) -> Bool {
+        subtractiveTitleKeys.contains(Self.normalizeTitle(info.title))
     }
 
     var selectedCalendarCount: Int { allowedTitleKeys.count }
@@ -384,19 +392,49 @@ final class DashboardStore: ObservableObject {
     }
 
     /// Includes/excludes a calendar, persists the allowlist, and re-extracts.
+    /// Removing a calendar also clears any subtractive designation.
     func setCalendar(_ info: CalendarInfo, included: Bool) {
         do {
             var config = try ChronicleConfig.load()
             let key = Self.normalizeTitle(info.title)
             config.calendarAllowlist.removeAll { Self.normalizeTitle($0) == key }
-            if included { config.calendarAllowlist.append(info.title) }
-            try config.save()
-            allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
-            objectWillChange.send()
-            refresh()
+            if included {
+                config.calendarAllowlist.append(info.title)
+            } else {
+                config.subtractiveCalendars.removeAll { Self.normalizeTitle($0) == key }
+            }
+            try persist(config)
         } catch {
             errorMessage = "\(error)"
         }
+    }
+
+    /// Marks a calendar subtractive (or not). Marking subtractive auto-includes
+    /// it, since a subtractive calendar's own time is still counted.
+    func setSubtractive(_ info: CalendarInfo, subtractive: Bool) {
+        do {
+            var config = try ChronicleConfig.load()
+            let key = Self.normalizeTitle(info.title)
+            config.subtractiveCalendars.removeAll { Self.normalizeTitle($0) == key }
+            if subtractive {
+                config.subtractiveCalendars.append(info.title)
+                if !config.calendarAllowlist.contains(where: { Self.normalizeTitle($0) == key }) {
+                    config.calendarAllowlist.append(info.title)
+                }
+            }
+            try persist(config)
+        } catch {
+            errorMessage = "\(error)"
+        }
+    }
+
+    /// Saves the config, refreshes local mirrors, and re-extracts.
+    private func persist(_ config: ChronicleConfig) throws {
+        try config.save()
+        allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
+        subtractiveTitleKeys = Set(config.subtractiveCalendars.map(Self.normalizeTitle))
+        objectWillChange.send()
+        refresh()
     }
 
     // MARK: - Refresh (extracts from Calendar in-process)

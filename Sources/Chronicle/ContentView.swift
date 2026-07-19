@@ -262,9 +262,12 @@ private struct CalendarPicker: View {
                 .frame(maxHeight: 360)
 
                 Divider()
-                Text("Selected calendars are included in your metrics.")
+                Text("Selected calendars are included in your metrics. The "
+                     + "minus icon marks a calendar subtractive — its time is "
+                     + "removed from overlapping events in other calendars.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
             }
@@ -300,20 +303,39 @@ private struct CalendarPickerRow: View {
     @ObservedObject var store: DashboardStore
     let calendar: CalendarInfo
 
+    private var isSubtractive: Bool { store.isCalendarSubtractive(calendar) }
+
     var body: some View {
-        Toggle(isOn: Binding(
-            get: { store.isCalendarSelected(calendar) },
-            set: { store.setCalendar(calendar, included: $0) }
-        )) {
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color(hex: calendar.colorHex) ?? .secondary)
-                    .frame(width: 12, height: 12)
-                Text(calendar.title)
-                    .lineLimit(1)
+        HStack(spacing: 8) {
+            Toggle(isOn: Binding(
+                get: { store.isCalendarSelected(calendar) },
+                set: { store.setCalendar(calendar, included: $0) }
+            )) {
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color(hex: calendar.colorHex) ?? .secondary)
+                        .frame(width: 12, height: 12)
+                    Text(calendar.title)
+                        .lineLimit(1)
+                }
             }
+            .toggleStyle(.checkbox)
+
+            Spacer(minLength: 4)
+
+            Button {
+                store.setSubtractive(calendar, subtractive: !isSubtractive)
+            } label: {
+                Image(systemName: isSubtractive ? "minus.circle.fill" : "minus.circle")
+                    .foregroundStyle(isSubtractive ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help(isSubtractive
+                  ? "Subtractive: this calendar's time is removed from overlapping "
+                    + "events in other calendars. Click to turn off."
+                  : "Mark subtractive: remove this calendar's time from overlapping "
+                    + "events in other calendars (also includes it).")
         }
-        .toggleStyle(.checkbox)
         .padding(.horizontal, 14)
         .padding(.vertical, 3)
     }
