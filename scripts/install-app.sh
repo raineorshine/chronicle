@@ -35,6 +35,18 @@ echo "==> Installing to ${DEST}…"
 rm -rf "$DEST"
 cp -R "$BUILT_APP" "$DEST"
 
+# Chronicle is ad-hoc signed (no Apple Developer identity), so every rebuild
+# produces a new code-signing hash. macOS ties the Calendar permission to that
+# hash, so a reinstall leaves the old grant pointing at the previous binary:
+# System Settings still shows Chronicle as allowed, but the freshly installed
+# app reads as "denied" and cannot re-prompt. Clearing the grant here makes the
+# next launch start from a clean "not determined" state so the in-app "Grant
+# Calendar Access" button shows the system prompt again.
+if command -v tccutil >/dev/null 2>&1; then
+	echo "==> Resetting stale Calendar permission (you'll be prompted to grant access again on next launch)…"
+	tccutil reset Calendar com.chronicle.app >/dev/null 2>&1 || true
+fi
+
 echo
 echo "Installed. Launch it from Spotlight (Cmd-Space → \"Chronicle\") or Launchpad."
 echo "Pass --open to launch it now:  ./scripts/install-app.sh --open"

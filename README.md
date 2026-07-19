@@ -121,6 +121,21 @@ The standalone extractor binary run from a plain terminal may not be able to
 show the prompt; grant access from the app first, or run it via the installed
 LaunchAgent.
 
+### "Calendar access was denied" after reinstalling
+
+Chronicle is ad-hoc signed (it ships without an Apple Developer identity), so
+each rebuild produces a new code-signing hash. macOS ties the Calendar grant to
+that hash, so after you reinstall a fresh build the old grant no longer matches:
+**System Settings still shows Chronicle as allowed, but the app reads as denied
+and can't re-prompt.** The install scripts clear the stale grant automatically
+(`tccutil reset Calendar com.chronicle.app`) so the next launch prompts again.
+If you ever hit this on a build that predates that fix, reset it manually and
+relaunch:
+
+```bash
+tccutil reset Calendar com.chronicle.app
+```
+
 ## Daily extraction (LaunchAgent)
 
 Install a LaunchAgent that runs the extractor daily at 02:00 (and once at login):

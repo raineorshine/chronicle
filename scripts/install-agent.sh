@@ -32,6 +32,15 @@ echo "==> Installing binary and directories…"
 mkdir -p "$BIN_DIR" "$LOG_DIR" "$AGENT_DIR"
 cp -f "$BUILT_BIN" "$BIN_DIR/chronicle-extract"
 
+# The extractor is ad-hoc signed, so each rebuild changes its code-signing hash
+# and macOS invalidates the previously granted Calendar permission (the old
+# grant is pinned to the prior binary). Reset it so the next run starts from a
+# clean "not determined" state and can prompt / be granted fresh.
+if command -v tccutil >/dev/null 2>&1; then
+	echo "==> Resetting stale Calendar permission for the extractor…"
+	tccutil reset Calendar "$LABEL" >/dev/null 2>&1 || true
+fi
+
 echo "==> Writing LaunchAgent to $PLIST_DST…"
 sed \
 	-e "s#__EXTRACT_BIN__#$BIN_DIR/chronicle-extract#g" \
