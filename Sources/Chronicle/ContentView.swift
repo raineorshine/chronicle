@@ -103,19 +103,57 @@ private struct TaskRow: View {
     }
 }
 
-/// A compact color well for a task. Tapping opens the system color picker;
+/// A compact color swatch backed by `NSColorWell`'s `.minimal` style: a small
+/// rounded square that opens the system color picker on click (unlike SwiftUI's
+/// `ColorPicker`, which renders a wide pill that can't shrink to a square).
+private struct ColorWell: NSViewRepresentable {
+    @Binding var color: Color
+    var size: CGFloat = 14
+
+    func makeNSView(context: Context) -> NSColorWell {
+        let well = NSColorWell(style: .minimal)
+        well.color = NSColor(color)
+        well.target = context.coordinator
+        well.action = #selector(Coordinator.colorChanged(_:))
+        well.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            well.widthAnchor.constraint(equalToConstant: size),
+            well.heightAnchor.constraint(equalToConstant: size),
+        ])
+        return well
+    }
+
+    func updateNSView(_ nsView: NSColorWell, context: Context) {
+        context.coordinator.color = $color
+        let target = NSColor(color)
+        if nsView.color != target { nsView.color = target }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(color: $color) }
+
+    final class Coordinator: NSObject {
+        var color: Binding<Color>
+        init(color: Binding<Color>) { self.color = color }
+
+        @objc func colorChanged(_ sender: NSColorWell) {
+            color.wrappedValue = Color(sender.color)
+        }
+    }
+}
+
+/// A compact color swatch for a task. Clicking opens the system color picker;
 /// right-clicking offers a reset to the task's stable auto-color.
 private struct TaskColorSwatch: View {
     @ObservedObject var store: DashboardStore
     let taskKey: String
+    var size: CGFloat = 14
 
     var body: some View {
-        ColorPicker("", selection: Binding(
+        ColorWell(color: Binding(
             get: { store.taskColor(forKey: taskKey) },
             set: { store.setTaskColor(taskKey, $0) }
-        ), supportsOpacity: false)
-        .labelsHidden()
-        .frame(width: 16, height: 16)
+        ), size: size)
+        .frame(width: size, height: size)
         .help("Set this task's color")
         .contextMenu {
             Button("Reset to Auto Color") { store.setTaskColor(taskKey, nil) }
@@ -553,13 +591,7 @@ private struct SegmentLegend: View {
                 let drillable = isTask
                 HStack(spacing: 6) {
                     if isTask {
-                        ColorPicker("", selection: Binding(
-                            get: { store.taskColor(forKey: style.key) },
-                            set: { store.setTaskColor(style.key, $0) }
-                        ), supportsOpacity: false)
-                        .labelsHidden()
-                        .frame(width: 11, height: 11)
-                        .help("Set \(style.displayLabel)'s color")
+                        TaskColorSwatch(store: store, taskKey: style.key, size: 11)
                     } else {
                         RoundedRectangle(cornerRadius: 2).fill(style.color)
                             .frame(width: 11, height: 11)
