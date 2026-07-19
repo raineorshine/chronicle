@@ -77,6 +77,42 @@ final class SegmentQueryTests: XCTestCase {
         XCTAssertEqual(points.first?.segmentKey, "em")
     }
 
+    func testTaskSummariesConsolidateEmojiVariantsUsingMostRecentLabel() throws {
+        let db = try makeDB()
+        // Same activity ("walk") logged with different emoji on different dates.
+        try db.replaceWindow(rows: [
+            row("2026-07-06", cal: "health", task: "walk", taskLabel: "🚶Walk", seconds: 3600),
+            row("2026-07-13", cal: "health", task: "walk", taskLabel: "👟Walk", seconds: 1800)
+        ], firstDate: "2026-07-01", lastDate: "2026-07-31")
+
+        let tasks = try db.taskSummaries(from: "2026-07-01", to: "2026-07-31")
+
+        // Emoji variants collapse to a single task, hours summed across them.
+        XCTAssertEqual(tasks.count, 1)
+        let walk = tasks.first
+        XCTAssertEqual(walk?.key, "walk")
+        XCTAssertEqual(walk?.hours ?? 0, 1.5, accuracy: 0.0001) // 1h + 0.5h
+        // The most recent occurrence's emoji wins.
+        XCTAssertEqual(walk?.label, "👟Walk")
+    }
+
+    func testTaskSummariesSubtaskUsesMostRecentEmojiLabel() throws {
+        let db = try makeDB()
+        try db.replaceWindow(rows: [
+            row("2026-07-06", cal: "health", task: "walk", taskLabel: "🚶Walk",
+                sub: "dog", seconds: 3600),
+            row("2026-07-13", cal: "health", task: "walk", taskLabel: "👟Walk",
+                sub: "dog", seconds: 1800)
+        ], firstDate: "2026-07-01", lastDate: "2026-07-31")
+
+        let tasks = try db.taskSummaries(from: "2026-07-01", to: "2026-07-31")
+        let walk = tasks.first { $0.key == "walk" }
+        XCTAssertEqual(walk?.label, "👟Walk")
+        XCTAssertEqual(walk?.subtasks.count, 1)
+        XCTAssertEqual(walk?.subtasks.first?.key, "dog")
+        XCTAssertEqual(walk?.subtasks.first?.label, "dog")
+    }
+
     func testTaskSummariesMergeAcrossCalendarsAndRank() throws {
         let db = try makeDB()
         try db.replaceWindow(rows: [
