@@ -37,7 +37,13 @@ final class DashboardStore: ObservableObject {
     /// Normalized titles of calendars currently included (mirrors config allowlist).
     private var allowedTitleKeys: Set<String> = []
 
-    private let calendar = Calendar.current
+    /// Week boundaries always start on Monday, independent of the locale's
+    /// default first weekday.
+    private let calendar: Calendar = {
+        var c = Calendar.current
+        c.firstWeekday = 2 // Monday
+        return c
+    }()
 
     private var dbPath: String { ChroniclePaths.databaseURL.path }
 
@@ -65,7 +71,7 @@ final class DashboardStore: ObservableObject {
     }
 
     /// Inclusive `yyyy-MM-dd` bounds covering the trailing `weeksWindow` weeks,
-    /// aligned to the calendar's `firstWeekday`, up to today.
+    /// aligned to Monday week starts, up to today.
     var dateBounds: (from: String, to: String) {
         let f = formatter()
         let today = calendar.startOfDay(for: Date())
