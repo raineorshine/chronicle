@@ -30,6 +30,7 @@ final class DashboardStore: ObservableObject {
     @Published var customTo: Date = Date()
 
     @Published var points: [DailyPoint] = []
+    @Published var calendarSeries: [CalendarDailyPoint] = []
     @Published var totals: RangeTotals = .zero
     @Published var errorMessage: String?
     @Published var isRefreshing = false
@@ -116,6 +117,8 @@ final class DashboardStore: ObservableObject {
         let bounds = dateBounds
         let series = try db.dailySeries(selection: selection, from: bounds.from, to: bounds.to)
         points = fill(series: series, from: bounds.from, to: bounds.to)
+        calendarSeries = try db.dailySeriesByCalendar(selection: selection,
+                                                      from: bounds.from, to: bounds.to)
         totals = try db.totals(selection: selection, from: bounds.from, to: bounds.to)
     }
 

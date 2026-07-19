@@ -12,10 +12,11 @@ final class DatabaseTests: XCTestCase {
                      cal: String = "work",
                      task: String = "em",
                      sub: String? = nil,
+                     color: String? = nil,
                      seconds: Int,
                      count: Int) -> DailyRow {
         DailyRow(date: date,
-                 calendarKey: cal, calendarLabel: cal.capitalized,
+                 calendarKey: cal, calendarLabel: cal.capitalized, calendarColor: color,
                  taskKey: task, taskLabel: task,
                  subtaskKey: sub, subtaskLabel: sub,
                  durationSeconds: seconds, occurrenceCount: count)
@@ -77,5 +78,29 @@ final class DatabaseTests: XCTestCase {
         let work = tree.first { $0.key == "work" }
         XCTAssertEqual(work?.tasks.count, 1)
         XCTAssertEqual(work?.tasks.first?.subtasks.map { $0.key }, ["accounting"])
+    }
+
+    func testCalendarColorRoundTripAndPerCalendarSeries() throws {
+        let db = try makeDB()
+        try db.replaceWindow(rows: [
+            row("2026-07-07", cal: "work", task: "em", color: "#FF9500", seconds: 3600, count: 1),
+            row("2026-07-07", cal: "personal", task: "gym", color: "#34C759", seconds: 1800, count: 1)
+        ], firstDate: "2026-07-01", lastDate: "2026-07-31")
+
+        // Per-calendar series returns one point per (date, calendar) with color.
+        let series = try db.dailySeriesByCalendar(selection: .all,
+                                                  from: "2026-07-01", to: "2026-07-31")
+        XCTAssertEqual(series.count, 2)
+        let work = series.first { $0.calendarKey == "work" }
+        let personal = series.first { $0.calendarKey == "personal" }
+        XCTAssertEqual(work?.colorHex, "#FF9500")
+        XCTAssertEqual(work?.hours ?? 0, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(personal?.colorHex, "#34C759")
+        XCTAssertEqual(personal?.hours ?? 0, 0.5, accuracy: 0.0001)
+
+        // Colors also surface on the hierarchy tree.
+        let tree = try db.hierarchy()
+        XCTAssertEqual(tree.first { $0.key == "work" }?.colorHex, "#FF9500")
+        XCTAssertEqual(tree.first { $0.key == "personal" }?.colorHex, "#34C759")
     }
 }

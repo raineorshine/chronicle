@@ -15,6 +15,14 @@ enum SyntheticData {
             return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)!
         }
 
+        func color(for calendarName: String) -> String? {
+            switch calendarName {
+            case "Personal": return "#34C759"   // green
+            case "Work":     return "#FF9500"   // orange
+            default:         return nil
+            }
+        }
+
         func add(_ title: String, calendarName: String,
                  day: Int, from: (Int, Int), to: (Int, Int)) {
             guard let parsed = TitleParser.parse(title) else { return }
@@ -23,7 +31,8 @@ enum SyntheticData {
                 title: parsed,
                 start: date(day, from.0, from.1),
                 end: date(day, to.0, to.1),
-                isAllDay: false))
+                isAllDay: false,
+                calendarColor: color(for: calendarName)))
         }
 
         func addSpan(_ title: String, calendarName: String,
@@ -35,7 +44,8 @@ enum SyntheticData {
                 title: parsed,
                 start: date(startDay, from.0, from.1),
                 end: date(endDay, to.0, to.1),
-                isAllDay: false))
+                isAllDay: false,
+                calendarColor: color(for: calendarName)))
         }
 
         // Two weeks of plausible activity.

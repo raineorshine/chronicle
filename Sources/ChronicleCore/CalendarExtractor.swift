@@ -91,7 +91,8 @@ public final class CalendarExtractor {
                                          title: parsed,
                                          start: start,
                                          end: end,
-                                         isAllDay: false))
+                                         isAllDay: false,
+                                         calendarColor: Self.hexString(from: event.calendar.cgColor)))
             }
         }
 

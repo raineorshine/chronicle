@@ -151,6 +151,7 @@ CREATE TABLE daily_time (
 
     calendar_key TEXT NOT NULL,
     calendar_label TEXT NOT NULL,
+    calendar_color TEXT,
 
     task_key TEXT NOT NULL,
     task_label TEXT NOT NULL,
@@ -242,7 +243,11 @@ Support time ranges:
 -   Year
 -   Custom
 
-The graph always plots daily hours.
+The graph always plots daily hours. Bars are colored to match each source
+calendar's color (persisted as `calendar_color`). A single-calendar (or
+task/subtask) selection renders bars in that calendar's color; **All Calendars**
+stacks each day into per-calendar segments, each in its own color, with a
+legend.
 
 The selected range displays total hours and occurrence count.
 

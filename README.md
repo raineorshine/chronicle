@@ -121,8 +121,11 @@ rm ~/Library/LaunchAgents/com.chronicle.extract.plist
 Launch **Chronicle.app**. Pick a node in the sidebar (a calendar, task, or
 subtask — selecting a parent rolls up all descendants), choose a range
 (Week / Month / Year / Custom), and the chart plots daily hours while the header
-shows total hours and occurrence count for the range. **Refresh** re-extracts
-from your selected calendars (in-process) and reloads.
+shows total hours and occurrence count for the range. Bars are colored to match
+each source calendar: a single-calendar (or task/subtask) selection uses that
+calendar's color, while **All Calendars** stacks each day into per-calendar
+segments with a legend. **Refresh** re-extracts from your selected calendars
+(in-process) and reloads.
 
 ## Trying it without Calendar access (demo data)
 

@@ -99,6 +99,7 @@ public struct DateAggregator {
                         date: dateStr,
                         calendarKey: event.calendar.key,
                         calendarLabel: event.calendar.label,
+                        calendarColor: event.calendarColor,
                         taskKey: event.title.task.key,
                         taskLabel: event.title.task.label,
                         subtaskKey: event.title.subtask?.key,

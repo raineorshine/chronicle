@@ -33,17 +33,21 @@ public struct EventInput {
     public let start: Date
     public let end: Date
     public let isAllDay: Bool
+    /// The source calendar's display color as `#RRGGBB`, if known.
+    public let calendarColor: String?
 
     public init(calendar: NormalizedName,
                 title: ParsedTitle,
                 start: Date,
                 end: Date,
-                isAllDay: Bool) {
+                isAllDay: Bool,
+                calendarColor: String? = nil) {
         self.calendar = calendar
         self.title = title
         self.start = start
         self.end = end
         self.isAllDay = isAllDay
+        self.calendarColor = calendarColor
     }
 }
 
@@ -52,6 +56,7 @@ public struct DailyRow: Equatable {
     public let date: String
     public let calendarKey: String
     public let calendarLabel: String
+    public let calendarColor: String?
     public let taskKey: String
     public let taskLabel: String
     public let subtaskKey: String?
@@ -62,6 +67,7 @@ public struct DailyRow: Equatable {
     public init(date: String,
                 calendarKey: String,
                 calendarLabel: String,
+                calendarColor: String? = nil,
                 taskKey: String,
                 taskLabel: String,
                 subtaskKey: String?,
@@ -71,6 +77,7 @@ public struct DailyRow: Equatable {
         self.date = date
         self.calendarKey = calendarKey
         self.calendarLabel = calendarLabel
+        self.calendarColor = calendarColor
         self.taskKey = taskKey
         self.taskLabel = taskLabel
         self.subtaskKey = subtaskKey

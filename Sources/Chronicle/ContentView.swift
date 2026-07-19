@@ -135,7 +135,7 @@ private struct DashboardDetail: View {
             if let message = store.errorMessage {
                 errorBanner(message)
             }
-            ChartCard(points: store.points)
+            ChartCard(store: store)
             Spacer()
         }
         .padding(20)
@@ -364,27 +364,53 @@ private struct RangeControls: View {
 }
 
 private struct ChartCard: View {
-    let points: [DailyPoint]
+    @ObservedObject var store: DashboardStore
+
+    private var series: [CalendarDailyPoint] { store.calendarSeries }
+
+    /// Distinct calendars present in the current view, ordered by label, each
+    /// paired with its resolved color (falls back to gray when unknown).
+    private var calendarsInView: [(label: String, color: Color)] {
+        var color: [String: Color] = [:]
+        var order: [String] = []
+        for point in series where color[point.calendarLabel] == nil {
+            color[point.calendarLabel] = Color(hex: point.colorHex) ?? .secondary
+            order.append(point.calendarLabel)
+        }
+        return order.map { ($0, color[$0]!) }
+    }
 
     var body: some View {
         Group {
-            if points.allSatisfy({ $0.hours == 0 }) {
+            if series.isEmpty || series.allSatisfy({ $0.hours == 0 }) {
                 emptyState
             } else {
-                Chart(points, id: \.date) { point in
-                    BarMark(
-                        x: .value("Day", chartDate(point.date)),
-                        y: .value("Hours", point.hours)
-                    )
-                    .foregroundStyle(Color.accentColor)
-                }
-                .chartYAxisLabel("Hours")
-                .frame(minHeight: 280)
+                chart
             }
         }
         .padding(16)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var chart: some View {
+        let calendars = calendarsInView
+        let bounds = store.dateBounds
+        return Chart(series) { point in
+            BarMark(
+                x: .value("Day", chartDate(point.date)),
+                y: .value("Hours", point.hours)
+            )
+            .foregroundStyle(by: .value("Calendar", point.calendarLabel))
+        }
+        .chartForegroundStyleScale(
+            domain: calendars.map(\.label),
+            range: calendars.map(\.color)
+        )
+        .chartXScale(domain: chartDate(bounds.from)...chartDate(bounds.to))
+        .chartYAxisLabel("Hours")
+        .chartLegend(calendars.count > 1 ? .visible : .hidden)
+        .frame(minHeight: 280)
     }
 
     private var emptyState: some View {

@@ -31,6 +31,29 @@ public struct DailyPoint: Equatable {
     }
 }
 
+/// One day of one calendar's contribution, for the stacked, colored chart.
+public struct CalendarDailyPoint: Equatable, Identifiable {
+    public let date: String
+    public let calendarKey: String
+    public let calendarLabel: String
+    public let colorHex: String?
+    public let hours: Double
+
+    public var id: String { "\(date)|\(calendarKey)" }
+
+    public init(date: String,
+                calendarKey: String,
+                calendarLabel: String,
+                colorHex: String?,
+                hours: Double) {
+        self.date = date
+        self.calendarKey = calendarKey
+        self.calendarLabel = calendarLabel
+        self.colorHex = colorHex
+        self.hours = hours
+    }
+}
+
 /// Totals for a selected range.
 public struct RangeTotals: Equatable {
     public let totalHours: Double
@@ -58,6 +81,7 @@ public struct CalendarNode: Identifiable, Equatable {
     public let key: String
     public let label: String
     public var tasks: [TaskNode]
+    public var colorHex: String? = nil
     public var id: String { key }
 }
 
@@ -127,13 +151,49 @@ extension Database {
         return RangeTotals(totalHours: Double(seconds) / 3600.0, occurrences: Int(occ))
     }
 
+    /// Per-calendar daily hours for a selection over `[from, to]` (inclusive),
+    /// used to render stacked, calendar-colored bars.
+    public func dailySeriesByCalendar(selection: HierarchySelection,
+                                      from: String,
+                                      to: String) throws -> [CalendarDailyPoint] {
+        let (whereSQL, binds) = whereClause(selection, from: from, to: to)
+        let sql = """
+        SELECT date, calendar_key, MAX(calendar_label), MAX(calendar_color),
+               SUM(duration_seconds)
+        FROM daily_time
+        WHERE \(whereSQL)
+        GROUP BY date, calendar_key
+        ORDER BY date, MAX(calendar_label);
+        """
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        for (i, value) in binds.enumerated() {
+            bindText(stmt, Int32(i + 1), value)
+        }
+
+        var points: [CalendarDailyPoint] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let date = columnText(stmt, 0) ?? ""
+            let calKey = columnText(stmt, 1) ?? ""
+            let calLabel = columnText(stmt, 2) ?? ""
+            let color = columnText(stmt, 3)
+            let seconds = sqlite3_column_int64(stmt, 4)
+            points.append(CalendarDailyPoint(date: date,
+                                             calendarKey: calKey,
+                                             calendarLabel: calLabel,
+                                             colorHex: color,
+                                             hours: Double(seconds) / 3600.0))
+        }
+        return points
+    }
+
     // MARK: Hierarchy tree
 
     /// Builds the Calendar → Task → Subtask tree from all stored rows.
     public func hierarchy() throws -> [CalendarNode] {
         let sql = """
         SELECT DISTINCT calendar_key, calendar_label, task_key, task_label,
-                        subtask_key, subtask_label
+                        subtask_key, subtask_label, calendar_color
         FROM daily_time
         ORDER BY calendar_label, task_label, subtask_label;
         """
@@ -141,6 +201,7 @@ extension Database {
         defer { sqlite3_finalize(stmt) }
 
         var calendars: [String: CalendarNode] = [:]
+        var calendarColor: [String: String] = [:]
         var calendarOrder: [String] = []
         // task key is only unique within a calendar → namespace it
         var taskIndex: [String: [String: TaskNode]] = [:]
@@ -153,11 +214,15 @@ extension Database {
             let taskLabel = columnText(stmt, 3) ?? ""
             let subKey = columnText(stmt, 4)
             let subLabel = columnText(stmt, 5)
+            let color = columnText(stmt, 6)
 
             if calendars[calKey] == nil {
                 calendars[calKey] = CalendarNode(key: calKey, label: calLabel, tasks: [])
                 calendarOrder.append(calKey)
                 taskIndex[calKey] = [:]
+            }
+            if let color, calendarColor[calKey] == nil {
+                calendarColor[calKey] = color
             }
             if taskIndex[calKey]?[taskKey] == nil {
                 taskIndex[calKey]?[taskKey] = TaskNode(key: taskKey, label: taskLabel, subtasks: [])
@@ -177,6 +242,7 @@ extension Database {
             let tasks = (taskIndex[calKey] ?? [:]).values
                 .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
             node.tasks = tasks
+            node.colorHex = calendarColor[calKey]
             return node
         }
     }

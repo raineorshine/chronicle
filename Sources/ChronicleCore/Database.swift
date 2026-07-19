@@ -35,6 +35,7 @@ public final class Database {
             try exec("PRAGMA journal_mode = WAL;")
             try exec("PRAGMA foreign_keys = ON;")
             try createSchema()
+            try migrate()
         }
     }
 
@@ -49,6 +50,7 @@ public final class Database {
 
             calendar_key TEXT NOT NULL,
             calendar_label TEXT NOT NULL,
+            calendar_color TEXT,
 
             task_key TEXT NOT NULL,
             task_label TEXT NOT NULL,
@@ -72,6 +74,22 @@ public final class Database {
         CREATE INDEX IF NOT EXISTS idx_daily_time_hier
             ON daily_time(calendar_key, task_key, subtask_key);
         """)
+    }
+
+    /// Applies additive migrations to databases created by older versions.
+    private func migrate() throws {
+        if !columnExists(table: "daily_time", column: "calendar_color") {
+            try exec("ALTER TABLE daily_time ADD COLUMN calendar_color TEXT;")
+        }
+    }
+
+    private func columnExists(table: String, column: String) -> Bool {
+        guard let stmt = try? prepare("PRAGMA table_info(\(table));") else { return false }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if columnText(stmt, 1) == column { return true }
+        }
+        return false
     }
 
     // MARK: - Write
@@ -104,9 +122,9 @@ public final class Database {
     private func insert(rows: [DailyRow]) throws {
         let sql = """
         INSERT INTO daily_time
-            (date, calendar_key, calendar_label, task_key, task_label,
+            (date, calendar_key, calendar_label, calendar_color, task_key, task_label,
              subtask_key, subtask_label, duration_seconds, occurrence_count)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -115,12 +133,13 @@ public final class Database {
             bindText(stmt, 1, row.date)
             bindText(stmt, 2, row.calendarKey)
             bindText(stmt, 3, row.calendarLabel)
-            bindText(stmt, 4, row.taskKey)
-            bindText(stmt, 5, row.taskLabel)
-            bindNullableText(stmt, 6, row.subtaskKey)
-            bindNullableText(stmt, 7, row.subtaskLabel)
-            sqlite3_bind_int64(stmt, 8, Int64(row.durationSeconds))
-            sqlite3_bind_int64(stmt, 9, Int64(row.occurrenceCount))
+            bindNullableText(stmt, 4, row.calendarColor)
+            bindText(stmt, 5, row.taskKey)
+            bindText(stmt, 6, row.taskLabel)
+            bindNullableText(stmt, 7, row.subtaskKey)
+            bindNullableText(stmt, 8, row.subtaskLabel)
+            sqlite3_bind_int64(stmt, 9, Int64(row.durationSeconds))
+            sqlite3_bind_int64(stmt, 10, Int64(row.occurrenceCount))
             guard sqlite3_step(stmt) == SQLITE_DONE else { throw stepError() }
         }
     }

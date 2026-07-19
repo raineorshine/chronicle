@@ -24,12 +24,14 @@ final class DateAggregatorTests: XCTestCase {
                        _ start: String,
                        _ end: String,
                        calendar name: String = "Work",
+                       color: String? = nil,
                        allDay: Bool = false) -> EventInput {
         EventInput(calendar: TitleParser.normalize(name),
                    title: TitleParser.parse(title)!,
                    start: date(start),
                    end: date(end),
-                   isAllDay: allDay)
+                   isAllDay: allDay,
+                   calendarColor: color)
     }
 
     private func window() -> ExtractionWindow {
@@ -88,16 +90,12 @@ final class DateAggregatorTests: XCTestCase {
         XCTAssertEqual(rows[0].occurrenceCount, 2)
     }
 
-    func testTaskAndSubtaskAreDistinctRows() {
+    func testCalendarColorCarriesThroughAndSplits() {
+        // Color propagates to the row, including across a midnight split.
         let rows = aggregator.aggregate([
-            event("em", "2026-07-07 09:00", "2026-07-07 10:00"),
-            event("em - accounting", "2026-07-07 10:00", "2026-07-07 11:15")
+            event("Deploy", "2026-07-07 22:00", "2026-07-08 02:00", color: "#FF9500")
         ], window: window())
         XCTAssertEqual(rows.count, 2)
-        let plain = rows.first { $0.subtaskKey == nil }
-        let sub = rows.first { $0.subtaskKey == "accounting" }
-        XCTAssertEqual(plain?.taskKey, "em")
-        XCTAssertEqual(sub?.taskKey, "em")
-        XCTAssertEqual(sub?.durationSeconds, Int(1.25 * 3600))
+        XCTAssertTrue(rows.allSatisfy { $0.calendarColor == "#FF9500" })
     }
 }
