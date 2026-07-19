@@ -146,6 +146,39 @@ The standalone extractor binary run from a plain terminal may not be able to
 show the prompt; grant access from the app first, or run it via the installed
 LaunchAgent.
 
+### Why the grant used to get stuck (and how it's fixed)
+
+Two separate problems both broke Calendar access:
+
+1. **Missing entitlement (why no prompt appeared).** The app runs with the
+   **hardened runtime**, and under hardened runtime macOS refuses to even show
+   the Calendar prompt unless the binary carries the
+   `com.apple.security.personal-information.calendars` entitlement. Without it,
+   `tccd` logs *"Policy disallows prompt … access to kTCCServiceCalendar
+   denied"*, nothing shows in System Settings, and the button does nothing.
+   `App/Chronicle.entitlements` and `Extractor/Extractor.entitlements` now
+   declare that entitlement.
+
+2. **Unstable signature (why a granted permission broke on the next build).**
+   Without an Apple Developer account, Xcode signs the app **ad-hoc**, whose
+   code hash changes on every build. macOS ties the grant to that hash, so after
+   a rebuild the running app no longer matched and could not re-prompt.
+   `scripts/install-app.sh` and `scripts/install-agent.sh` now sign with a
+   **stable, self-signed certificate** (`Chronicle Local Signing`, created
+   automatically by `scripts/create-signing-cert.sh`). Its Designated
+   Requirement is pinned to the certificate rather than the build hash, so the
+   permission you grant **persists across rebuilds**. When switching away from an
+   old ad-hoc build, the installer runs `tccutil reset Calendar` once to clear
+   the poisoned grant so the prompt appears again.
+
+If you ever get stuck, reset the grant manually and relaunch:
+
+```sh
+tccutil reset Calendar com.chronicle.app
+tccutil reset Calendar com.chronicle.extract
+```
+
+
 ## Daily extraction (LaunchAgent)
 
 Install a LaunchAgent that runs the extractor daily at 02:00 (and once at login):
