@@ -103,58 +103,85 @@ private struct TaskRow: View {
     }
 }
 
-/// A compact color swatch backed by `NSColorWell`'s `.minimal` style: a small
-/// rounded square that opens the system color picker on click (unlike SwiftUI's
-/// `ColorPicker`, which renders a wide pill that can't shrink to a square).
-private struct ColorWell: NSViewRepresentable {
-    @Binding var color: Color
-    var size: CGFloat = 14
+/// A grid of curated palette swatches. Selecting one assigns it as the task's
+/// color override; the currently-effective color is marked with a ring + check.
+private struct PalettePicker: View {
+    @ObservedObject var store: DashboardStore
+    let taskKey: String
+    @Environment(\.dismiss) private var dismiss
 
-    func makeNSView(context: Context) -> NSColorWell {
-        let well = NSColorWell(style: .minimal)
-        well.color = NSColor(color)
-        well.target = context.coordinator
-        well.action = #selector(Coordinator.colorChanged(_:))
-        well.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            well.widthAnchor.constraint(equalToConstant: size),
-            well.heightAnchor.constraint(equalToConstant: size),
-        ])
-        return well
-    }
+    private let columns = Array(repeating: GridItem(.fixed(22), spacing: 8), count: 6)
 
-    func updateNSView(_ nsView: NSColorWell, context: Context) {
-        context.coordinator.color = $color
-        let target = NSColor(color)
-        if nsView.color != target { nsView.color = target }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(color: $color) }
-
-    final class Coordinator: NSObject {
-        var color: Binding<Color>
-        init(color: Binding<Color>) { self.color = color }
-
-        @objc func colorChanged(_ sender: NSColorWell) {
-            color.wrappedValue = Color(sender.color)
+    var body: some View {
+        let current = store.taskColor(forKey: taskKey)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Task Color")
+                .font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(Array(DashboardStore.palette.enumerated()), id: \.offset) { _, swatch in
+                    let isSelected = swatch.hexString == current.hexString
+                    Button {
+                        store.setTaskColor(taskKey, swatch)
+                        dismiss()
+                    } label: {
+                        Circle()
+                            .fill(swatch)
+                            .frame(width: 20, height: 20)
+                            .overlay(
+                                Circle().strokeBorder(Color.primary.opacity(isSelected ? 0.9 : 0.15),
+                                                      lineWidth: isSelected ? 2 : 1)
+                            )
+                            .overlay(
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .opacity(isSelected ? 1 : 0)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help(isSelected ? "Current color" : "Set this color")
+                }
+            }
+            Divider()
+            Button("Reset to Auto Color") {
+                store.setTaskColor(taskKey, nil)
+                dismiss()
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .disabled(store.taskColors[taskKey] == nil)
         }
+        .padding(12)
+        .frame(width: 196)
     }
 }
 
-/// A compact color swatch for a task. Clicking opens the system color picker;
+/// A compact color swatch for a task. Clicking opens a curated palette picker;
 /// right-clicking offers a reset to the task's stable auto-color.
 private struct TaskColorSwatch: View {
     @ObservedObject var store: DashboardStore
     let taskKey: String
     var size: CGFloat = 14
+    @State private var showingPicker = false
 
     var body: some View {
-        ColorWell(color: Binding(
-            get: { store.taskColor(forKey: taskKey) },
-            set: { store.setTaskColor(taskKey, $0) }
-        ), size: size)
-        .frame(width: size, height: size)
+        Button {
+            showingPicker = true
+        } label: {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(store.taskColor(forKey: taskKey))
+                .frame(width: size, height: size)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
         .help("Set this task's color")
+        .popover(isPresented: $showingPicker, arrowEdge: .bottom) {
+            PalettePicker(store: store, taskKey: taskKey)
+        }
         .contextMenu {
             Button("Reset to Auto Color") { store.setTaskColor(taskKey, nil) }
                 .disabled(store.taskColors[taskKey] == nil)
