@@ -100,4 +100,39 @@ final class SegmentQueryTests: XCTestCase {
         XCTAssertEqual(gym?.hours ?? 0, 1.5, accuracy: 0.0001)
         XCTAssertTrue(gym?.subtasks.isEmpty ?? false)
     }
+
+    func testTaskSummariesWindowMembershipWithCurrentWeekHours() throws {
+        let db = try makeDB()
+        // Window = 2026-07-06 .. 2026-07-19; current week = 2026-07-13 .. 2026-07-19.
+        try db.replaceWindow(rows: [
+            // "old" activity: only active in an earlier window week (idle this week).
+            row("2026-07-08", cal: "work", task: "old", seconds: 7200),                  // 2h last week
+            // "em": some last week, more this week; a subtask only this week.
+            row("2026-07-09", cal: "work", task: "em", seconds: 3600),                   // 1h last week (ignored)
+            row("2026-07-14", cal: "work", task: "em", seconds: 1800),                   // 0.5h this week
+            row("2026-07-15", cal: "personal", task: "em", sub: "accounting", seconds: 1800), // 0.5h this week, subtask
+            // "gym": only this week.
+            row("2026-07-16", cal: "personal", task: "gym", seconds: 3600)              // 1h this week
+        ], firstDate: "2026-07-06", lastDate: "2026-07-19")
+
+        let tasks = try db.taskSummaries(windowFrom: "2026-07-06", windowTo: "2026-07-19",
+                                         hoursFrom: "2026-07-13", hoursTo: "2026-07-19")
+
+        // All three window activities are listed; sorted by current-week hours desc,
+        // so the idle-this-week "old" sinks to the bottom with 0h.
+        XCTAssertEqual(tasks.map { $0.key }, ["em", "gym", "old"])
+
+        let em = tasks.first { $0.key == "em" }
+        XCTAssertEqual(em?.hours ?? -1, 1.0, accuracy: 0.0001) // 0.5 + 0.5 this week only
+        XCTAssertEqual(em?.subtasks.count, 1)
+        XCTAssertEqual(em?.subtasks.first?.key, "accounting")
+        XCTAssertEqual(em?.subtasks.first?.hours ?? -1, 0.5, accuracy: 0.0001)
+
+        let gym = tasks.first { $0.key == "gym" }
+        XCTAssertEqual(gym?.hours ?? -1, 1.0, accuracy: 0.0001)
+
+        let old = tasks.first { $0.key == "old" }
+        XCTAssertEqual(old?.hours ?? -1, 0.0, accuracy: 0.0001) // present in window, idle this week
+        XCTAssertTrue(old?.subtasks.isEmpty ?? false)
+    }
 }
