@@ -131,15 +131,15 @@ private struct DashboardDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            RangeControls(store: store)
+            WindowControls(store: store)
             if let message = store.errorMessage {
                 errorBanner(message)
             }
-            ChartCard(store: store)
+            WeeklyChartCard(store: store)
             Spacer()
         }
         .padding(20)
-        .frame(minWidth: 560, minHeight: 420)
+        .frame(minWidth: 640, minHeight: 460)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 CalendarPickerButton(store: store)
@@ -161,14 +161,26 @@ private struct DashboardDetail: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(selectionTitle).font(.title2).bold()
-                Text("\(store.dateBounds.from) → \(store.dateBounds.to)")
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    if store.selectedNodeID != "all" {
+                        Button {
+                            store.drillUp()
+                        } label: {
+                            Image(systemName: "chevron.left")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Back to the broader view")
+                    }
+                    Text(selectionTitle).font(.title2).bold()
+                }
+                Text(store.isTaskLevel ? "Hours per activity by week"
+                                       : "Subtask breakdown by week")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
             HStack(spacing: 24) {
-                Metric(value: String(format: "%.1f", store.totals.totalHours), label: "Hours")
+                LatestWeekMetric(store: store)
                 Metric(value: "\(store.totals.occurrences)", label: "Occurrences")
             }
         }
@@ -316,7 +328,6 @@ extension Color {
     }
 }
 
-
 private struct Metric: View {
     let value: String
     let label: String
@@ -329,63 +340,68 @@ private struct Metric: View {
     }
 }
 
-private struct RangeControls: View {
+/// The latest week's hours plus a colored delta chip versus the prior week.
+private struct LatestWeekMetric: View {
+    @ObservedObject var store: DashboardStore
+
+    var body: some View {
+        let latest = store.latestWeek
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(String(format: "%.1f", latest.hours))
+                .font(.title).monospacedDigit().bold()
+            HStack(spacing: 6) {
+                Text("This week").font(.caption).foregroundStyle(.secondary)
+                if let delta = latest.delta, abs(delta) >= 0.05 {
+                    let up = delta > 0
+                    Text("\(up ? "▲" : "▼") \(String(format: "%.1f", abs(delta)))h")
+                        .font(.caption).monospacedDigit()
+                        .foregroundStyle(up ? Color.green : Color.red)
+                        .help("Change versus the previous week")
+                }
+            }
+        }
+    }
+}
+
+private struct WindowControls: View {
     @ObservedObject var store: DashboardStore
 
     var body: some View {
         HStack(spacing: 12) {
-            Picker("Range", selection: Binding(
-                get: { store.preset },
-                set: { store.preset = $0; store.reloadData() }
+            Picker("Weeks", selection: Binding(
+                get: { store.weeksWindow },
+                set: { store.setWeeksWindow($0) }
             )) {
-                ForEach(RangePreset.allCases) { preset in
-                    Text(preset.title).tag(preset)
+                ForEach(store.allowedWeekWindows, id: \.self) { n in
+                    Text("\(n) wks").tag(n)
                 }
             }
             .pickerStyle(.segmented)
             .fixedSize()
 
-            if store.preset == .custom {
-                DatePicker("", selection: Binding(
-                    get: { store.customFrom },
-                    set: { store.customFrom = $0; store.reloadData() }
-                ), displayedComponents: .date)
-                .labelsHidden()
-                Text("to").foregroundStyle(.secondary)
-                DatePicker("", selection: Binding(
-                    get: { store.customTo },
-                    set: { store.customTo = $0; store.reloadData() }
-                ), displayedComponents: .date)
-                .labelsHidden()
-            }
+            Text("\(store.dateBounds.from) → \(store.dateBounds.to)")
+                .font(.caption).foregroundStyle(.secondary)
             Spacer()
         }
     }
 }
 
-private struct ChartCard: View {
+// MARK: - Weekly stacked chart
+
+private struct WeeklyChartCard: View {
     @ObservedObject var store: DashboardStore
-
-    private var series: [CalendarDailyPoint] { store.calendarSeries }
-
-    /// Distinct calendars present in the current view, ordered by label, each
-    /// paired with its resolved color (falls back to gray when unknown).
-    private var calendarsInView: [(label: String, color: Color)] {
-        var color: [String: Color] = [:]
-        var order: [String] = []
-        for point in series where color[point.calendarLabel] == nil {
-            color[point.calendarLabel] = Color(hex: point.colorHex) ?? .secondary
-            order.append(point.calendarLabel)
-        }
-        return order.map { ($0, color[$0]!) }
-    }
+    @State private var hoveredWeek: String?
+    @State private var hoverX: CGFloat = 0
 
     var body: some View {
         Group {
-            if series.isEmpty || series.allSatisfy({ $0.hours == 0 }) {
+            if store.stacks.points.isEmpty {
                 emptyState
             } else {
-                chart
+                VStack(alignment: .leading, spacing: 12) {
+                    chart
+                    SegmentLegend(store: store)
+                }
             }
         }
         .padding(16)
@@ -394,23 +410,88 @@ private struct ChartCard: View {
     }
 
     private var chart: some View {
-        let calendars = calendarsInView
-        let bounds = store.dateBounds
-        return Chart(series) { point in
+        Chart(store.stacks.points) { point in
             BarMark(
-                x: .value("Day", chartDate(point.date)),
+                x: .value("Week", point.weekStart),
                 y: .value("Hours", point.hours)
             )
-            .foregroundStyle(by: .value("Calendar", point.calendarLabel))
+            .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
+            .opacity(point.weekStart == store.currentWeekStart ? 0.55 : 1.0)
         }
-        .chartForegroundStyleScale(
-            domain: calendars.map(\.label),
-            range: calendars.map(\.color)
-        )
-        .chartXScale(domain: chartDate(bounds.from)...chartDate(bounds.to))
+        .chartForegroundStyleScale(domain: store.styleDomain, range: store.styleRange)
+        .chartXScale(domain: store.windowWeekStarts)
+        .chartXAxis {
+            AxisMarks(values: store.windowWeekStarts) { value in
+                if let week = value.as(String.self) {
+                    AxisValueLabel {
+                        Text(store.weekLabelShort(week))
+                            + Text(week == store.currentWeekStart ? " •" : "")
+                    }
+                }
+            }
+        }
         .chartYAxisLabel("Hours")
-        .chartLegend(calendars.count > 1 ? .visible : .hidden)
-        .frame(minHeight: 280)
+        .chartLegend(.hidden)
+        .frame(minHeight: 300)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                ZStack(alignment: .topLeading) {
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                guard let plotAnchor = proxy.plotFrame else { return }
+                                let plot = geo[plotAnchor]
+                                let x = location.x - plot.origin.x
+                                if let week: String = proxy.value(atX: x) {
+                                    hoveredWeek = week
+                                    hoverX = location.x
+                                }
+                            case .ended:
+                                hoveredWeek = nil
+                            }
+                        }
+                    if let week = hoveredWeek, !store.segments(inWeek: week).isEmpty {
+                        tooltip(for: week)
+                            .fixedSize()
+                            .offset(x: min(max(hoverX - 90, 0), geo.size.width - 200), y: 4)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+        }
+    }
+
+    private func tooltip(for week: String) -> some View {
+        let rows = store.segments(inWeek: week)
+        let total = rows.reduce(0) { $0 + $1.hours }
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(store.weekLabelShort(week)
+                 + (week == store.currentWeekStart ? " · in progress" : ""))
+                .font(.caption).bold()
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2).fill(row.color)
+                        .frame(width: 9, height: 9)
+                    Text(row.label).font(.caption2).lineLimit(1)
+                    Spacer(minLength: 12)
+                    Text(String(format: "%.1fh", row.hours))
+                        .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+            Divider()
+            HStack {
+                Text("Total").font(.caption2).bold()
+                Spacer(minLength: 12)
+                Text(String(format: "%.1fh", total))
+                    .font(.caption2).monospacedDigit().bold()
+            }
+        }
+        .padding(8)
+        .frame(width: 200, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+        .shadow(radius: 6, y: 2)
     }
 
     private var emptyState: some View {
@@ -420,13 +501,36 @@ private struct ChartCard: View {
             Text("Run Refresh to extract from Calendar.")
                 .font(.caption).foregroundStyle(.tertiary)
         }
-        .frame(maxWidth: .infinity, minHeight: 280)
+        .frame(maxWidth: .infinity, minHeight: 300)
     }
+}
 
-    private func chartDate(_ s: String) -> Date {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f.date(from: s) ?? Date()
+/// A tappable legend. At the activity level, clicking a segment drills into its
+/// subtasks; "Other" and the subtask level are non-interactive.
+private struct SegmentLegend: View {
+    @ObservedObject var store: DashboardStore
+
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .leading)]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+            ForEach(store.segmentStyles) { style in
+                let drillable = store.isTaskLevel && style.key != WeeklyBucketing.otherKey
+                Button {
+                    store.drillInto(segmentKey: style.key)
+                } label: {
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 2).fill(style.color)
+                            .frame(width: 11, height: 11)
+                        Text(style.displayLabel).font(.caption).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!drillable)
+                .help(drillable ? "Break \(style.displayLabel) down by subtask" : "")
+            }
+        }
     }
 }

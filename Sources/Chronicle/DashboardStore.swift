@@ -2,38 +2,28 @@ import Foundation
 import SwiftUI
 import ChronicleCore
 
-/// Preset time ranges for the dashboard. All are trailing windows ending today,
-/// except `.custom`, which uses explicit dates.
-enum RangePreset: String, CaseIterable, Identifiable {
-    case week, month, year, custom
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .week: return "Week"
-        case .month: return "Month"
-        case .year: return "Year"
-        case .custom: return "Custom"
-        }
-    }
-}
-
-/// Observable state backing the dashboard: hierarchy tree, current selection,
-/// range, and the derived daily series + totals read from SQLite.
+/// Observable state backing the dashboard: hierarchy tree, current scope
+/// selection, the trailing week window, and the derived weekly stacked series
+/// read from SQLite.
 @MainActor
 final class DashboardStore: ObservableObject {
     @Published var calendars: [CalendarNode] = []
     @Published var selection: HierarchySelection = .all
     @Published var selectedNodeID: String = "all"
 
-    @Published var preset: RangePreset = .week
-    @Published var customFrom: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date())!
-    @Published var customTo: Date = Date()
+    /// Number of trailing weeks shown on the X axis (includes the current,
+    /// in-progress week). One of `allowedWeekWindows`.
+    @Published var weeksWindow: Int = 8
 
-    @Published var points: [DailyPoint] = []
-    @Published var calendarSeries: [CalendarDailyPoint] = []
+    /// Bucketed weekly stacks for the current scope + window.
+    @Published var stacks: WeeklyStacks = .empty
+    /// Segment styles (display label + color) in stacking / legend order.
+    @Published var segmentStyles: [SegmentStyle] = []
     @Published var totals: RangeTotals = .zero
     @Published var errorMessage: String?
     @Published var isRefreshing = false
+
+    let allowedWeekWindows = [4, 8, 12]
 
     // MARK: - Calendar picker state
 
@@ -58,32 +48,44 @@ final class DashboardStore: ObservableObject {
 
     // MARK: - Range
 
-    /// Inclusive `yyyy-MM-dd` bounds for the current range selection.
-    var dateBounds: (from: String, to: String) {
+    private func formatter() -> DateFormatter {
         let f = DateFormatter()
         f.calendar = calendar
         f.timeZone = calendar.timeZone
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
+        return f
+    }
 
+    /// `yyyy-MM-dd` of the first day of the current (in-progress) week.
+    var currentWeekStart: String {
         let today = calendar.startOfDay(for: Date())
-        let fromDate: Date
-        let toDate: Date
-        switch preset {
-        case .week:
-            fromDate = calendar.date(byAdding: .day, value: -6, to: today)!
-            toDate = today
-        case .month:
-            fromDate = calendar.date(byAdding: .day, value: -29, to: today)!
-            toDate = today
-        case .year:
-            fromDate = calendar.date(byAdding: .day, value: -364, to: today)!
-            toDate = today
-        case .custom:
-            fromDate = min(customFrom, customTo)
-            toDate = max(customFrom, customTo)
+        let start = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
+        return formatter().string(from: start)
+    }
+
+    /// Inclusive `yyyy-MM-dd` bounds covering the trailing `weeksWindow` weeks,
+    /// aligned to the calendar's `firstWeekday`, up to today.
+    var dateBounds: (from: String, to: String) {
+        let f = formatter()
+        let today = calendar.startOfDay(for: Date())
+        let thisWeek = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
+        let fromDate = calendar.date(byAdding: .weekOfYear,
+                                     value: -(max(1, weeksWindow) - 1),
+                                     to: thisWeek) ?? thisWeek
+        return (f.string(from: fromDate), f.string(from: today))
+    }
+
+    // MARK: - Scope -> query dimension
+
+    /// The segment dimension and the scope filter for the current selection:
+    /// a task/subtask selection breaks down by Subtask; otherwise by Task.
+    private var queryPlan: (dimension: SegmentDimension, scope: HierarchySelection) {
+        if selection.taskKey != nil {
+            return (.subtask, HierarchySelection(calendarKey: selection.calendarKey,
+                                                 taskKey: selection.taskKey))
         }
-        return (f.string(from: fromDate), f.string(from: toDate))
+        return (.task, HierarchySelection(calendarKey: selection.calendarKey))
     }
 
     // MARK: - Loading
@@ -115,32 +117,123 @@ final class DashboardStore: ObservableObject {
 
     private func reload(using db: Database) throws {
         let bounds = dateBounds
-        let series = try db.dailySeries(selection: selection, from: bounds.from, to: bounds.to)
-        points = fill(series: series, from: bounds.from, to: bounds.to)
-        calendarSeries = try db.dailySeriesByCalendar(selection: selection,
-                                                      from: bounds.from, to: bounds.to)
+        let plan = queryPlan
+        let daily = try db.segmentDailySeries(selection: plan.scope,
+                                              dimension: plan.dimension,
+                                              from: bounds.from, to: bounds.to)
+        stacks = WeeklyBucketing.bucket(daily, calendar: calendar, topN: 8)
+        segmentStyles = Self.styles(for: stacks.segments, calendars: calendars)
         totals = try db.totals(selection: selection, from: bounds.from, to: bounds.to)
     }
 
-    /// Fills missing days with zero so the chart shows a continuous axis.
-    private func fill(series: [DailyPoint], from: String, to: String) -> [DailyPoint] {
-        let f = DateFormatter()
-        f.calendar = calendar
-        f.timeZone = calendar.timeZone
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        guard let start = f.date(from: from), let end = f.date(from: to), start <= end else {
-            return series
+    // MARK: - Derived chart data
+
+    private var styleIndex: [String: SegmentStyle] {
+        Dictionary(uniqueKeysWithValues: segmentStyles.map { ($0.key, $0) })
+    }
+
+    /// Display label for a segment key (unique per render; disambiguated in `styles`).
+    func displayLabel(forSegment key: String) -> String {
+        styleIndex[key]?.displayLabel ?? key
+    }
+
+    /// The domain (ordered display labels) for the color scale + legend.
+    var styleDomain: [String] { segmentStyles.map(\.displayLabel) }
+    var styleRange: [Color] { segmentStyles.map(\.color) }
+
+    func color(forSegment key: String) -> Color { styleIndex[key]?.color ?? .gray }
+
+    /// A week's segments as (label, color, hours), heaviest first — for tooltips.
+    func segments(inWeek week: String) -> [(label: String, color: Color, hours: Double)] {
+        stacks.points
+            .filter { $0.weekStart == week }
+            .map { (displayLabel(forSegment: $0.segmentKey),
+                    color(forSegment: $0.segmentKey), $0.hours) }
+            .sorted { $0.hours > $1.hours }
+    }
+
+    /// Short axis/tooltip label for a `yyyy-MM-dd` week start, e.g. "Jul 14".
+    func weekLabelShort(_ week: String) -> String {
+        guard let date = formatter().date(from: week) else { return week }
+        let out = DateFormatter()
+        out.calendar = calendar
+        out.timeZone = calendar.timeZone
+        out.locale = .current
+        out.setLocalizedDateFormatFromTemplate("MMMd")
+        return out.string(from: date)
+    }
+
+    func weekDate(_ week: String) -> Date { formatter().date(from: week) ?? Date() }
+
+
+    /// Total hours per week, ascending by week start.
+    var weekTotals: [(weekStart: String, hours: Double)] {
+        var byWeek: [String: Double] = [:]
+        for p in stacks.points { byWeek[p.weekStart, default: 0] += p.hours }
+        return byWeek.keys.sorted().map { ($0, byWeek[$0] ?? 0) }
+    }
+
+    /// Hours logged in the most recent week and the delta versus the prior week.
+    var latestWeek: (hours: Double, delta: Double?) {
+        let totals = weekTotals
+        guard let last = totals.last else { return (0, nil) }
+        let prior = totals.count >= 2 ? totals[totals.count - 2].hours : nil
+        return (last.hours, prior.map { last.hours - $0 })
+    }
+
+    // MARK: - Segment styling
+
+    /// A distinct chart segment resolved to a unique display label and a color.
+    struct SegmentStyle: Identifiable, Equatable {
+        let key: String
+        let displayLabel: String
+        let color: Color
+        var id: String { key }
+    }
+
+    /// A categorical palette for activity/subtask segments (Other -> gray).
+    private static let palette: [Color] = [
+        Color(hex: "#4E79A7")!, Color(hex: "#F28E2B")!, Color(hex: "#59A14F")!,
+        Color(hex: "#E15759")!, Color(hex: "#B07AA1")!, Color(hex: "#76B7B2")!,
+        Color(hex: "#EDC948")!, Color(hex: "#FF9DA7")!, Color(hex: "#9C755F")!,
+        Color(hex: "#BAB0AC")!
+    ]
+
+    /// Resolves segments to unique display labels + palette colors. Duplicate
+    /// labels (e.g. same task name in two calendars) are disambiguated with the
+    /// calendar name so the legend and color scale stay unambiguous.
+    private static func styles(for segments: [WeeklySegment],
+                               calendars: [CalendarNode]) -> [SegmentStyle] {
+        let calendarLabel = Dictionary(uniqueKeysWithValues:
+            calendars.map { ($0.key, $0.label) })
+
+        var labelCounts: [String: Int] = [:]
+        for s in segments where !s.isOther { labelCounts[s.label, default: 0] += 1 }
+
+        var used: Set<String> = []
+        var paletteIndex = 0
+        return segments.map { segment in
+            let color: Color
+            if segment.isOther {
+                color = .gray
+            } else {
+                color = palette[paletteIndex % palette.count]
+                paletteIndex += 1
+            }
+
+            var label = segment.label
+            if !segment.isOther, (labelCounts[segment.label] ?? 0) > 1 {
+                let calKey = segment.key.split(separator: "\u{1F}").first.map(String.init) ?? ""
+                if let cal = calendarLabel[calKey] { label = "\(segment.label) · \(cal)" }
+            }
+            // Guard against any remaining collisions.
+            var unique = label
+            var n = 2
+            while used.contains(unique) { unique = "\(label) (\(n))"; n += 1 }
+            used.insert(unique)
+
+            return SegmentStyle(key: segment.key, displayLabel: unique, color: color)
         }
-        let byDate = Dictionary(uniqueKeysWithValues: series.map { ($0.date, $0) })
-        var result: [DailyPoint] = []
-        var day = start
-        while day <= end {
-            let key = f.string(from: day)
-            result.append(byDate[key] ?? DailyPoint(date: key, hours: 0, occurrences: 0))
-            day = calendar.date(byAdding: .day, value: 1, to: day)!
-        }
-        return result
     }
 
     // MARK: - Selection
@@ -169,6 +262,57 @@ final class DashboardStore: ObservableObject {
     func select(_ selection: HierarchySelection, nodeID: String) {
         self.selection = selection
         self.selectedNodeID = nodeID
+        reloadData()
+    }
+
+    /// True when the chart segments each bar by activity (Task), i.e. the top
+    /// level or a calendar scope — as opposed to a subtask breakdown.
+    var isTaskLevel: Bool { selection.taskKey == nil }
+
+    /// Drills into an activity segment so the chart re-stacks it by subtask.
+    /// No-op for the "Other" bucket or when already at subtask level.
+    func drillInto(segmentKey key: String) {
+        guard isTaskLevel, key != WeeklyBucketing.otherKey else { return }
+        let parts = key.split(separator: "\u{1F}").map(String.init)
+        guard parts.count == 2 else { return }
+        select(HierarchySelection(calendarKey: parts[0], taskKey: parts[1]),
+               nodeID: "task:\(parts[0]):\(parts[1])")
+    }
+
+    /// Moves the scope up one level (subtask → task → calendar → all).
+    func drillUp() {
+        let parts = selectedNodeID.split(separator: ":").map(String.init)
+        switch parts.first {
+        case "sub" where parts.count >= 3:
+            select(HierarchySelection(calendarKey: parts[1], taskKey: parts[2]),
+                   nodeID: "task:\(parts[1]):\(parts[2])")
+        case "task" where parts.count >= 2:
+            select(HierarchySelection(calendarKey: parts[1]), nodeID: "cal:\(parts[1])")
+        case "cal":
+            select(.all, nodeID: "all")
+        default:
+            break
+        }
+    }
+
+    /// Every week start in the current window (ascending), so the X axis shows
+    /// all `weeksWindow` weeks even when some have no data.
+    var windowWeekStarts: [String] {
+        let f = formatter()
+        guard let start = f.date(from: dateBounds.from),
+              let end = f.date(from: currentWeekStart) else { return [] }
+        var result: [String] = []
+        var day = start
+        while day <= end {
+            result.append(f.string(from: day))
+            day = calendar.date(byAdding: .weekOfYear, value: 1, to: day) ?? end.addingTimeInterval(1)
+            if result.count > 60 { break }
+        }
+        return result
+    }
+
+    func setWeeksWindow(_ weeks: Int) {
+        weeksWindow = weeks
         reloadData()
     }
 
@@ -237,7 +381,7 @@ final class DashboardStore: ObservableObject {
     /// Requests Calendar access (showing the system prompt if needed) and
     /// rebuilds the rolling window directly from EventKit. Running in-process
     /// means macOS attributes the permission request to Chronicle itself, so
-    /// the prompt appears and the app registers under Privacy › Calendars.
+    /// the prompt appears and the app registers under Privacy > Calendars.
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true

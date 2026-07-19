@@ -31,6 +31,33 @@ public struct DailyPoint: Equatable {
     }
 }
 
+/// The dimension used to segment the weeks-on-X stacked chart. `task` segments
+/// each bar by activity; `subtask` breaks a single activity into its subtasks.
+public enum SegmentDimension: String, Equatable {
+    case task
+    case subtask
+}
+
+/// One day's contribution from a single chart segment (an activity or a
+/// subtask), used to build the weekly stacked chart. `segmentKey` is a stable
+/// identity **within the current scope**; `segmentLabel` is its display name.
+public struct SegmentDailyPoint: Equatable {
+    /// Sentinel `segmentKey` for the "(no subtask)" bucket.
+    public static let noSubtaskKey = "\u{1F}nosub"
+
+    public let date: String
+    public let segmentKey: String
+    public let segmentLabel: String
+    public let hours: Double
+
+    public init(date: String, segmentKey: String, segmentLabel: String, hours: Double) {
+        self.date = date
+        self.segmentKey = segmentKey
+        self.segmentLabel = segmentLabel
+        self.hours = hours
+    }
+}
+
 /// One day of one calendar's contribution, for the stacked, colored chart.
 public struct CalendarDailyPoint: Equatable, Identifiable {
     public let date: String
@@ -183,6 +210,68 @@ extension Database {
                                              calendarLabel: calLabel,
                                              colorHex: color,
                                              hours: Double(seconds) / 3600.0))
+        }
+        return points
+    }
+
+    /// Per-segment daily hours for the weekly stacked chart. When `dimension`
+    /// is `.task`, each segment is one activity (namespaced `calendar_key` +
+    /// `task_key` so tasks never collide across calendars); when `.subtask`,
+    /// each segment is a subtask of the scoped activity, and events with no
+    /// subtask fold into a single "(no subtask)" segment.
+    public func segmentDailySeries(selection: HierarchySelection,
+                                   dimension: SegmentDimension,
+                                   from: String,
+                                   to: String) throws -> [SegmentDailyPoint] {
+        let (whereSQL, binds) = whereClause(selection, from: from, to: to)
+        let sql: String
+        switch dimension {
+        case .task:
+            sql = """
+            SELECT date, calendar_key, task_key, MAX(task_label), SUM(duration_seconds)
+            FROM daily_time
+            WHERE \(whereSQL)
+            GROUP BY date, calendar_key, task_key
+            ORDER BY date;
+            """
+        case .subtask:
+            sql = """
+            SELECT date, subtask_key, MAX(subtask_label), SUM(duration_seconds)
+            FROM daily_time
+            WHERE \(whereSQL)
+            GROUP BY date, subtask_key
+            ORDER BY date;
+            """
+        }
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        for (i, value) in binds.enumerated() {
+            bindText(stmt, Int32(i + 1), value)
+        }
+
+        var points: [SegmentDailyPoint] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let date = columnText(stmt, 0) ?? ""
+            let key: String
+            let label: String
+            let seconds: Int64
+            switch dimension {
+            case .task:
+                let calKey = columnText(stmt, 1) ?? ""
+                let taskKey = columnText(stmt, 2) ?? ""
+                key = "\(calKey)\u{1F}\(taskKey)"
+                label = columnText(stmt, 3) ?? taskKey
+                seconds = sqlite3_column_int64(stmt, 4)
+            case .subtask:
+                let subKey = columnText(stmt, 1)
+                key = subKey ?? SegmentDailyPoint.noSubtaskKey
+                label = columnText(stmt, 2) ?? (subKey == nil ? "(no subtask)" : subKey!)
+                seconds = sqlite3_column_int64(stmt, 3)
+            }
+            points.append(SegmentDailyPoint(date: date,
+                                            segmentKey: key,
+                                            segmentLabel: label,
+                                            hours: Double(seconds) / 3600.0))
         }
         return points
     }

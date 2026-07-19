@@ -56,6 +56,31 @@ xcodebuild build -scheme chronicle-extract -destination 'platform=macOS'
 xcodebuild test  -scheme ChronicleCore   -destination 'platform=macOS'
 ```
 
+## Installing the app
+
+Chronicle ships two install scripts, one per half of the system:
+
+| Script                     | Builds                | Installs to                                   | Runs via              | Job                              |
+| -------------------------- | --------------------- | --------------------------------------------- | --------------------- | -------------------------------- |
+| `scripts/install-app.sh`   | `Chronicle` (GUI app) | `/Applications`                               | you open it manually  | **reads** & visualizes the DB    |
+| `scripts/install-agent.sh` | `chronicle-extract` (CLI) | `~/Library/Application Support/Chronicle/bin` | `launchd` daily/at-login | **writes** metrics into the DB |
+
+They're complementary: the agent gathers calendar data on a schedule, and the
+app is what you open to look at it. See
+[Daily extraction (LaunchAgent)](#daily-extraction-launchagent) for the agent.
+
+To build a Release build and install **Chronicle.app** into `/Applications` (so
+it appears in Spotlight and Launchpad), run:
+
+```bash
+./scripts/install-app.sh          # build + install
+./scripts/install-app.sh --open   # build + install, then launch it
+```
+
+Re-run it any time to update the installed app after code changes. It builds
+into the git-ignored `.build-xcode/` directory, so it won't clash with Xcode's
+own DerivedData.
+
 ## Choosing calendars
 
 Open **Chronicle.app** and click the **Calendars** button in the toolbar. The
@@ -118,14 +143,21 @@ rm ~/Library/LaunchAgents/com.chronicle.extract.plist
 
 ## Using the dashboard
 
-Launch **Chronicle.app**. Pick a node in the sidebar (a calendar, task, or
-subtask — selecting a parent rolls up all descendants), choose a range
-(Week / Month / Year / Custom), and the chart plots daily hours while the header
-shows total hours and occurrence count for the range. Bars are colored to match
-each source calendar: a single-calendar (or task/subtask) selection uses that
-calendar's color, while **All Calendars** stacks each day into per-calendar
-segments with a legend. **Refresh** re-extracts from your selected calendars
-(in-process) and reloads.
+Launch **Chronicle.app**. The main view is a **weeks-on-X stacked bar chart**:
+each bar is one week over a trailing window (**4 / 8 / 12 weeks**, selectable),
+and each bar is split into colored segments — one per **activity** (Task) — so
+you can read the current week's mix, compare it against previous weeks, and see
+trends at a glance. The heaviest activities dominate each bar, so ranking is
+implicit; the long tail folds into a neutral **Other** segment. A legend names
+each segment and hovering a week shows a tooltip with its per-activity hours and
+total. The current (in-progress) week is drawn dimmed and marked with a dot.
+
+The header shows **this week's hours** with a colored **▲/▼ delta versus last
+week**, plus the window's occurrence count. Segments **adapt to scope**: at the
+top level (or a single calendar) they are activities; click a legend entry — or
+a node in the sidebar — to drill into an activity and re-stack it by its
+**subtasks**. The back chevron in the header moves the scope up a level.
+**Refresh** re-extracts from your selected calendars (in-process) and reloads.
 
 ## Trying it without Calendar access (demo data)
 
@@ -154,8 +186,10 @@ the demo rows are automatically replaced the first time you extract real data.
 - **Rolling rebuild.** Each run deletes and regenerates the window's rows in a
   single transaction, so edited/moved/deleted/detached recurring events are
   handled automatically.
-- **Views.** Week/month/year/custom are pure SQL aggregation over the single
-  `daily_time` table — no derived tables.
+- **Views.** The dashboard shows a trailing window of **N weeks** (4/8/12). A
+  per-day, per-segment series is read from the single `daily_time` table with SQL
+  aggregation, then bucketed into weeks in Swift (honoring the locale's
+  `firstWeekday`) and reduced to the top activities plus an **Other** bucket.
 
 ## Tests
 
