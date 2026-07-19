@@ -360,6 +360,10 @@ private struct WindowControls: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            Text("\(store.dateBounds.from) → \(store.dateBounds.to)")
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+
             Picker("Weeks", selection: Binding(
                 get: { store.weeksWindow },
                 set: { store.setWeeksWindow($0) }
@@ -368,12 +372,9 @@ private struct WindowControls: View {
                     Text("\(n) wks").tag(n)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
+            .labelsHidden()
             .fixedSize()
-
-            Text("\(store.dateBounds.from) → \(store.dateBounds.to)")
-                .font(.caption).foregroundStyle(.secondary)
-            Spacer()
         }
     }
 }
