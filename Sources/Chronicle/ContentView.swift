@@ -432,7 +432,7 @@ private struct WeeklyChartCard: View {
                 y: .value("Hours", point.hours)
             )
             .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
-            .opacity(point.weekStart == store.currentWeekStart ? 0.55 : 1.0)
+            .opacity(1.0)
         }
         .chartForegroundStyleScale(domain: store.styleDomain, range: store.styleRange)
         .chartXScale(domain: store.windowWeekStarts)
