@@ -103,49 +103,85 @@ private struct TaskRow: View {
     }
 }
 
-/// Bridges a SwiftUI swatch to the process-wide `NSColorPanel`. Since the panel
-/// is a singleton, it is retargeted to whichever swatch was clicked last, and
-/// forwards live color changes to that swatch's handler.
-private final class ColorPanelController: NSObject {
-    static let shared = ColorPanelController()
-    private var onChange: ((Color) -> Void)?
+/// A grid of curated palette swatches. Selecting one assigns it as the task's
+/// color override; the currently-effective color is marked with a ring + check.
+private struct PalettePicker: View {
+    @ObservedObject var store: DashboardStore
+    let taskKey: String
+    @Environment(\.dismiss) private var dismiss
 
-    func present(initial: Color, onChange: @escaping (Color) -> Void) {
-        self.onChange = onChange
-        let panel = NSColorPanel.shared
-        panel.showsAlpha = false
-        panel.color = NSColor(initial)
-        panel.setTarget(self)
-        panel.setAction(#selector(colorDidChange(_:)))
-        panel.makeKeyAndOrderFront(nil)
-    }
+    private let columns = Array(repeating: GridItem(.fixed(22), spacing: 8), count: 6)
 
-    @objc private func colorDidChange(_ sender: NSColorPanel) {
-        onChange?(Color(sender.color))
+    var body: some View {
+        let current = store.taskColor(forKey: taskKey)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Task Color")
+                .font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(Array(DashboardStore.palette.enumerated()), id: \.offset) { _, swatch in
+                    let isSelected = swatch.hexString == current.hexString
+                    Button {
+                        store.setTaskColor(taskKey, swatch)
+                        dismiss()
+                    } label: {
+                        Circle()
+                            .fill(swatch)
+                            .frame(width: 20, height: 20)
+                            .overlay(
+                                Circle().strokeBorder(Color.primary.opacity(isSelected ? 0.9 : 0.15),
+                                                      lineWidth: isSelected ? 2 : 1)
+                            )
+                            .overlay(
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .opacity(isSelected ? 1 : 0)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help(isSelected ? "Current color" : "Set this color")
+                }
+            }
+            Divider()
+            Button("Reset to Auto Color") {
+                store.setTaskColor(taskKey, nil)
+                dismiss()
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .disabled(store.taskColors[taskKey] == nil)
+        }
+        .padding(12)
+        .frame(width: 196)
     }
 }
 
-/// A tiny rounded-square color swatch for a task, matching the legend's "Other"
-/// swatch. Clicking opens the system color panel; right-clicking resets to the
-/// task's stable auto-color.
+/// A compact color swatch for a task. Clicking opens a curated palette picker;
+/// right-clicking offers a reset to the task's stable auto-color.
 private struct TaskColorSwatch: View {
     @ObservedObject var store: DashboardStore
     let taskKey: String
-    var size: CGFloat = 12
+    var size: CGFloat = 14
+    @State private var showingPicker = false
 
     var body: some View {
         Button {
-            ColorPanelController.shared.present(
-                initial: store.taskColor(forKey: taskKey)
-            ) { store.setTaskColor(taskKey, $0) }
+            showingPicker = true
         } label: {
-            RoundedRectangle(cornerRadius: 2)
+            RoundedRectangle(cornerRadius: 3)
                 .fill(store.taskColor(forKey: taskKey))
                 .frame(width: size, height: size)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+                )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Set this task's color")
+        .popover(isPresented: $showingPicker, arrowEdge: .bottom) {
+            PalettePicker(store: store, taskKey: taskKey)
+        }
         .contextMenu {
             Button("Reset to Auto Color") { store.setTaskColor(taskKey, nil) }
                 .disabled(store.taskColors[taskKey] == nil)
