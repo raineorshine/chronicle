@@ -4,12 +4,13 @@ import Foundation
 ///
 /// Pipeline for each component (see spec "Normalization Rules"):
 /// 1. Unicode NFC normalize.
-/// 2. Remove emoji.
-/// 3. Remove parenthesized metadata, e.g. `(%2)`.
-/// 4. Remove remaining punctuation/symbols.
-/// 5. Collapse whitespace.
-/// 6. Trim.
-/// 7. Lowercase for the comparison key; preserve original case as the label.
+/// 2. Remove parenthesized metadata, e.g. `(%2)`.
+/// 3. Remove remaining punctuation/symbols (emoji are kept).
+/// 4. Collapse whitespace.
+/// 5. Trim.
+/// 6. The result is the display `label`, which *preserves emoji* and original case.
+/// 7. The comparison `key` is the label with emoji removed and lowercased, so tasks
+///    that differ only by emoji (e.g. `🚶Walk` vs `👟Walk`) collapse to one activity.
 ///
 /// Note: parenthesized metadata is removed *before* generic punctuation.
 /// Stripping punctuation first would delete the parentheses and make the
@@ -43,15 +44,18 @@ public enum TitleParser {
     }
 
     /// Runs the normalization pipeline on a single component and produces a
-    /// `NormalizedName` (canonical label + lowercased key).
+    /// `NormalizedName`. The `label` preserves emoji (and original case) for
+    /// display; the `key` strips emoji and lowercases so activities that differ
+    /// only by emoji group together.
     public static func normalize(_ component: String) -> NormalizedName {
         var text = component.precomposedStringWithCanonicalMapping   // 1. NFC
-        text = removeEmoji(text)                                      // 2. emoji
-        text = removeParenthesizedMetadata(text)                     // 3. (...)
-        text = removePunctuation(text)                               // 4. punctuation
-        text = collapseWhitespace(text)                             // 5. + 6.
+        text = removeParenthesizedMetadata(text)                     // 2. (...)
+        text = removePunctuation(text)                               // 3. punctuation (emoji kept)
+        text = collapseWhitespace(text)                             // 4. + 5.
         let label = text
-        return NormalizedName(label: label, key: label.lowercased())
+        // The key ignores emoji so `🚶Walk` and `👟Walk` map to the same activity.
+        let key = collapseWhitespace(removeEmoji(label)).lowercased()
+        return NormalizedName(label: label, key: key)
     }
 
     // MARK: - Steps
@@ -103,7 +107,8 @@ public enum TitleParser {
         let alphanumerics = CharacterSet.alphanumerics
         let whitespace = CharacterSet.whitespaces
         for scalar in s.unicodeScalars {
-            if alphanumerics.contains(scalar) || whitespace.contains(scalar) {
+            if alphanumerics.contains(scalar) || whitespace.contains(scalar)
+                || isEmojiScalar(scalar) {
                 scalars.append(scalar)
             }
         }

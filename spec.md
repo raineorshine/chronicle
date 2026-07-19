@@ -99,17 +99,22 @@ becomes
 Apply in this order:
 
 1.  Unicode normalize.
-2.  Remove emoji.
-3.  Remove parenthesized metadata (for example `(%2)`).
-4.  Remove punctuation except the configured subtask separator.
-5.  Collapse whitespace.
-6.  Trim.
-7.  Compare case-insensitively.
-8.  Preserve canonical display labels separately.
+2.  Remove parenthesized metadata (for example `(%2)`).
+3.  Remove punctuation except the configured subtask separator. Emoji are kept.
+4.  Collapse whitespace.
+5.  Trim.
+6.  The result is the canonical display **label**, which preserves emoji and case.
+7.  The comparison **key** is the label with emoji removed and lowercased, compared
+    case-insensitively.
 
 > Note: parenthesized metadata is removed **before** generic punctuation.
 > Stripping punctuation first would delete the parentheses and make the
 > `(...)` metadata undetectable.
+
+> Note: emoji stay in the display label but are excluded from the comparison key, so
+> activities that differ only by emoji (e.g. `🚶Walk` and `👟Walk`) are treated as one
+> activity for grouping, hours, the sidebar, and the chart legend. When an activity's
+> emoji varies over time, the label from its **most recent** occurrence is displayed.
 
 Treat `" - "` (space-hyphen-space) as the only subtask separator.
 

@@ -390,8 +390,13 @@ extension Database {
     /// activities while tallying only the current week.
     public func taskSummaries(windowFrom: String, windowTo: String,
                               hoursFrom: String, hoursTo: String) throws -> [TaskSummary] {
+        // Labels are picked from the most recent date within the window (via
+        // `MAX(date || sep || label)`, using the fixed-width `yyyy-MM-dd` prefix
+        // to order), so an activity's newest emoji wins when it varies over time.
         let sql = """
-        SELECT task_key, MAX(task_label), subtask_key, MAX(subtask_label),
+        SELECT task_key, MAX(date || char(31) || task_label), subtask_key,
+               MAX(CASE WHEN subtask_label IS NOT NULL
+                        THEN date || char(31) || subtask_label END),
                SUM(CASE WHEN date >= ? AND date <= ? THEN duration_seconds ELSE 0 END)
         FROM daily_time
         WHERE date >= ? AND date <= ?
@@ -416,9 +421,9 @@ extension Database {
 
         while sqlite3_step(stmt) == SQLITE_ROW {
             let taskKey = columnText(stmt, 0) ?? ""
-            let taskLabel = columnText(stmt, 1) ?? taskKey
+            let taskLabel = Self.decodeMostRecentLabel(columnText(stmt, 1)) ?? taskKey
             let subKey = columnText(stmt, 2)
-            let subLabel = columnText(stmt, 3)
+            let subLabel = Self.decodeMostRecentLabel(columnText(stmt, 3))
             let hours = Double(sqlite3_column_int64(stmt, 4)) / 3600.0
 
             if tasks[taskKey] == nil {
@@ -450,5 +455,14 @@ extension Database {
                            _ hb: Double, _ lb: String) -> Bool {
         if ha != hb { return ha > hb }
         return la.localizedCaseInsensitiveCompare(lb) == .orderedAscending
+    }
+
+    /// Decodes a `date || U+001F || label` value produced by a most-recent-date
+    /// `MAX(...)` aggregate, returning just the label. Returns `nil` for `nil`
+    /// input (e.g. the "(no subtask)" bucket).
+    static func decodeMostRecentLabel(_ encoded: String?) -> String? {
+        guard let encoded else { return nil }
+        guard let sep = encoded.range(of: "\u{1F}") else { return encoded }
+        return String(encoded[sep.upperBound...])
     }
 }
