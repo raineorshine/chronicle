@@ -41,5 +41,16 @@ echo "Pass --open to launch it now:  ./scripts/install-app.sh --open"
 
 if [[ "${1:-}" == "--open" ]]; then
 	echo "==> Launching…"
-	open "$DEST"
+	# `open "$DEST"` only reactivates an already-running instance, so a stale
+	# copy would stay on screen. Quit any running instance first, force-kill if
+	# it doesn't exit, then start the freshly-installed bundle with `open -n`.
+	osascript -e 'quit app "Chronicle"' >/dev/null 2>&1 || true
+	for _ in $(seq 1 20); do
+		pids=$(pgrep -f "Chronicle.app/Contents/MacOS/Chronicle" || true)
+		[[ -z "$pids" ]] && break
+		sleep 0.25
+	done
+	pids=$(pgrep -f "Chronicle.app/Contents/MacOS/Chronicle" || true)
+	[[ -n "$pids" ]] && kill $pids 2>/dev/null || true
+	open -n "$DEST"
 fi
