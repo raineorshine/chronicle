@@ -16,7 +16,7 @@ final class DashboardStore: ObservableObject {
 
     /// Number of trailing weeks shown on the X axis (includes the current,
     /// in-progress week). One of `allowedWeekWindows`.
-    @Published var weeksWindow: Int = 8
+    @Published var weeksWindow: Int = 4
 
     /// Bucketed weekly stacks for the current scope + window.
     @Published var stacks: WeeklyStacks = .empty
