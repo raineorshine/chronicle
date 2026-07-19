@@ -160,16 +160,18 @@ private struct DashboardDetail: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    if store.selectedNodeID != "all" {
-                        Button {
-                            store.drillUp()
-                        } label: {
-                            Image(systemName: "chevron.left")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Back to the broader view")
+                HStack(spacing: showsBackButton ? 8 : 0) {
+                    Button {
+                        store.drillUp()
+                    } label: {
+                        Image(systemName: "chevron.left")
                     }
+                    .buttonStyle(.borderless)
+                    .help("Back to the broader view")
+                    .opacity(showsBackButton ? 1 : 0)
+                    .frame(width: showsBackButton ? nil : 0)
+                    .disabled(!showsBackButton)
+                    .accessibilityHidden(!showsBackButton)
                     Text(selectionTitle).font(.title2).bold()
                 }
                 Text(store.isTaskLevel ? "Hours per activity by week"
@@ -178,6 +180,10 @@ private struct DashboardDetail: View {
             }
             Spacer()
         }
+    }
+
+    private var showsBackButton: Bool {
+        store.selectedNodeID != "all"
     }
 
     private var selectionTitle: String {
