@@ -646,6 +646,7 @@ private struct SegmentLegend: View {
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .leading)]
 
     var body: some View {
+        let weekHours = store.currentWeekHoursBySegment
         LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
             ForEach(store.segmentStyles) { style in
                 let isTask = store.isTaskLevel && style.key != WeeklyBucketing.otherKey
@@ -662,7 +663,11 @@ private struct SegmentLegend: View {
                     } label: {
                         HStack(spacing: 6) {
                             Text(style.displayLabel).font(.caption).lineLimit(1)
-                            Spacer(minLength: 0)
+                            Spacer(minLength: 4)
+                            Text(String(format: "%.1fh", weekHours[style.key] ?? 0))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
                         .contentShape(Rectangle())
                     }

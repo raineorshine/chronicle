@@ -220,6 +220,19 @@ final class DashboardStore: ObservableObject {
         taskList.reduce(0) { $0 + $1.hours }
     }
 
+    /// Hours in the current (in-progress) week per segment key. Derived from the
+    /// already-bucketed `stacks.points`, matching the "current week" definition
+    /// used for the sidebar tallies (`currentWeekStart`). Segments absent from
+    /// the current week are simply missing (callers treat that as zero).
+    var currentWeekHoursBySegment: [String: Double] {
+        let week = currentWeekStart
+        var byKey: [String: Double] = [:]
+        for p in stacks.points where p.weekStart == week {
+            byKey[p.segmentKey, default: 0] += p.hours
+        }
+        return byKey
+    }
+
     /// Total hours per week, ascending by week start.
     var weekTotals: [(weekStart: String, hours: Double)] {
         var byWeek: [String: Double] = [:]
