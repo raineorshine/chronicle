@@ -21,4 +21,27 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(decoded.wholeCalendarSegments, [])
         XCTAssertEqual(decoded.calendarAllowlist, ["Work"])
     }
+
+    func testLegacySingleSeparatorMigratesToList() throws {
+        // Older configs stored a single `subtaskSeparator` string.
+        let json = #"{"calendarAllowlist":["Work"],"subtaskSeparator":" / "}"#
+        let decoded = try JSONDecoder().decode(ChronicleConfig.self,
+                                               from: Data(json.utf8))
+        XCTAssertEqual(decoded.subtaskSeparators, [" / "])
+    }
+
+    func testMissingSeparatorDefaultsToHyphenAndPipe() throws {
+        let json = #"{"calendarAllowlist":["Work"]}"#
+        let decoded = try JSONDecoder().decode(ChronicleConfig.self,
+                                               from: Data(json.utf8))
+        XCTAssertEqual(decoded.subtaskSeparators, [" - ", " | "])
+    }
+
+    func testRoundTripPreservesSeparatorList() throws {
+        let config = ChronicleConfig(subtaskSeparators: [" - ", " | "])
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(ChronicleConfig.self, from: data)
+        XCTAssertEqual(decoded.subtaskSeparators, [" - ", " | "])
+        XCTAssertEqual(decoded, config)
+    }
 }

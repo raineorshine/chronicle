@@ -116,7 +116,8 @@ Apply in this order:
 > activity for grouping, hours, the sidebar, and the chart legend. When an activity's
 > emoji varies over time, the label from its **most recent** occurrence is displayed.
 
-Treat `" - "` (space-hyphen-space) as the only subtask separator.
+Treat `" - "` (space-hyphen-space) and `" | "` (space-pipe-space) as the subtask
+separators. A title is split on the leftmost occurrence of either.
 
 Do not split ordinary hyphenated words.
 
@@ -322,7 +323,7 @@ Configuration is a JSON file created on first run:
     managed from the app's **Calendars** toolbar picker (checkboxes with the
     calendar's color); the app reads and writes this field. Hand-editing is
     optional.
--   `subtaskSeparator` — defaults to `" - "`.
+-   `subtaskSeparators` — list of separators, defaults to `[" - ", " | "]`.
 -   `subtractiveCalendars` — calendar names (case-insensitive) treated as
     subtractive (see **Subtractive Calendars**). Managed from the same picker
     via a per-calendar minus toggle. Marking a calendar subtractive also
