@@ -78,7 +78,7 @@ private struct TaskRow: View {
     private var taskRow: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                TaskColorSwatch(store: store, taskKey: task.key)
+                TaskColorSwatch(store: store, taskKey: task.key, taskName: task.label)
                 Button {
                     store.select(HierarchySelection(taskKey: task.key), nodeID: nodeID)
                 } label: {
@@ -195,6 +195,7 @@ private struct PalettePicker: View {
 private struct TaskColorSwatch: View {
     @ObservedObject var store: DashboardStore
     let taskKey: String
+    let taskName: String
     var size: CGFloat = 14
     @State private var showingPicker = false
 
@@ -217,6 +218,10 @@ private struct TaskColorSwatch: View {
             PalettePicker(store: store, taskKey: taskKey)
         }
         .contextMenu {
+            Button("Copy task name") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(taskName, forType: .string)
+            }
             Button("Reset to Auto Color") { store.setTaskColor(taskKey, nil) }
                 .disabled(store.taskColors[taskKey] == nil)
         }
@@ -879,7 +884,7 @@ private struct SegmentLegend: View {
                 let drillable = isTask
                 HStack(spacing: 6) {
                     if isTask {
-                        TaskColorSwatch(store: store, taskKey: style.key, size: 11)
+                        TaskColorSwatch(store: store, taskKey: style.key, taskName: style.displayLabel, size: 11)
                     } else {
                         RoundedRectangle(cornerRadius: 2).fill(style.color)
                             .frame(width: 11, height: 11)
