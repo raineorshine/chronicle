@@ -268,7 +268,7 @@ private struct DashboardDetail: View {
                 errorBanner(message)
             }
             WeeklyChartCard(store: store)
-            Spacer()
+                .frame(maxHeight: .infinity)
         }
         .padding(20)
         .frame(minWidth: 640, minHeight: 460, maxHeight: .infinity, alignment: .top)
@@ -760,8 +760,12 @@ private struct WeeklyChartCard: View {
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     chart
-                    SegmentLegend(store: store)
+                    ScrollView {
+                        SegmentLegend(store: store)
+                    }
+                    .frame(maxHeight: .infinity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .padding(16)
@@ -792,7 +796,7 @@ private struct WeeklyChartCard: View {
         }
         .chartYAxisLabel("Hours")
         .chartLegend(.hidden)
-        .frame(minHeight: 300)
+        .frame(height: 300)
         .chartOverlay { proxy in
             GeometryReader { geo in
                 ZStack(alignment: .topLeading) {
