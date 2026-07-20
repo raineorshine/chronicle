@@ -523,6 +523,16 @@ final class DashboardStore: ObservableObject {
         allowedTitleKeys.contains(Self.normalizeTitle(info.title))
     }
 
+    /// `availableCalendars` reordered so selected (allowlisted) calendars come
+    /// first. `availableCalendars` is already sorted alphabetically and this is a
+    /// stable partition, so A→Z order is preserved within each group. Re-sorts
+    /// live when a calendar is toggled (`persist` fires `objectWillChange`).
+    var sortedAvailableCalendars: [CalendarInfo] {
+        let selected = availableCalendars.filter { isCalendarSelected($0) }
+        let unselected = availableCalendars.filter { !isCalendarSelected($0) }
+        return selected + unselected
+    }
+
     func isCalendarSubtractive(_ info: CalendarInfo) -> Bool {
         subtractiveTitleKeys.contains(Self.normalizeTitle(info.title))
     }

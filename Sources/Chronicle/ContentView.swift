@@ -392,7 +392,7 @@ private struct CalendarPicker: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(store.availableCalendars) { cal in
+                        ForEach(store.sortedAvailableCalendars) { cal in
                             CalendarPickerRow(store: store, calendar: cal)
                         }
                     }
