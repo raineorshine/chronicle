@@ -37,7 +37,7 @@ private struct HierarchySidebar: View {
             }
 
             ForEach(store.taskList) { task in
-                TaskRow(store: store, task: task)
+                TaskRow(store: store, hover: store.hover, task: task)
             }
         }
         .listStyle(.sidebar)
@@ -48,6 +48,7 @@ private struct HierarchySidebar: View {
 /// it has any; otherwise it's a single selectable row.
 private struct TaskRow: View {
     @ObservedObject var store: DashboardStore
+    @ObservedObject var hover: HoverHighlight
     let task: TaskSummary
 
     private var nodeID: String { "task:\(task.key)" }
@@ -65,12 +66,12 @@ private struct TaskRow: View {
                                       systemImage: "circle.fill",
                                       indent: 1,
                                       detail: Self.hours(sub.hours),
-                                      isHighlighted: store.isHighlighted(sub.key),
+                                      isHighlighted: hover.isHighlighted(sub.key),
                                       onHoverChanged: { hovering in
                                           if hovering {
-                                              store.setHighlight(sub.key)
-                                          } else if store.highlightedSegmentKey == sub.key {
-                                              store.setHighlight(nil)
+                                              hover.setHighlight(sub.key)
+                                          } else if hover.key == sub.key {
+                                              hover.setHighlight(nil)
                                           }
                                       }) {
                             store.select(HierarchySelection(taskKey: task.key,
@@ -106,13 +107,13 @@ private struct TaskRow: View {
             HoursShareBar(fraction: shareFraction,
                           color: store.taskColor(forKey: task.key))
         }
-        .rowHighlight(active: store.isHighlighted(task.key)
+        .rowHighlight(active: hover.isHighlighted(task.key)
                       && store.selectedNodeID != nodeID)
         .onHover { hovering in
             if hovering {
-                store.setHighlight(task.key)
-            } else if store.highlightedSegmentKey == task.key {
-                store.setHighlight(nil)
+                hover.setHighlight(task.key)
+            } else if hover.key == task.key {
+                hover.setHighlight(nil)
             }
         }
         .listRowBackground(RowHoverBackground(isSelected: store.selectedNodeID == nodeID))
@@ -343,7 +344,7 @@ private struct DashboardDetail: View {
             if let message = store.errorMessage {
                 errorBanner(message)
             }
-            WeeklyChartCard(store: store)
+            WeeklyChartCard(store: store, hover: store.hover)
                 .frame(maxHeight: .infinity)
         }
         .padding(20)
@@ -835,8 +836,7 @@ private struct WeeksPopUpButton: NSViewRepresentable {
 
 private struct WeeklyChartCard: View {
     @ObservedObject var store: DashboardStore
-    @State private var hovered: DashboardStore.HoveredSegment?
-    @State private var hoverPoint: CGPoint = .zero
+    @ObservedObject var hover: HoverHighlight
 
     var body: some View {
         Group {
@@ -846,7 +846,7 @@ private struct WeeklyChartCard: View {
                 VStack(alignment: .leading, spacing: 12) {
                     chart
                     ScrollView {
-                        SegmentLegend(store: store)
+                        SegmentLegend(store: store, hover: hover)
                     }
                     .frame(maxHeight: .infinity)
                 }
@@ -867,14 +867,14 @@ private struct WeeklyChartCard: View {
                 )
                 .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
                 .interpolationMethod(.linear)
-                .opacity(store.chartOpacity(forSegment: point.segmentKey))
+                .opacity(hover.chartOpacity(forSegment: point.segmentKey))
             } else {
                 BarMark(
                     x: .value("Week", store.weekDate(point.weekStart)),
                     y: .value("Hours", point.hours)
                 )
                 .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
-                .opacity(store.chartOpacity(forSegment: point.segmentKey))
+                .opacity(hover.chartOpacity(forSegment: point.segmentKey))
             }
         }
         .chartForegroundStyleScale(domain: store.styleDomain, range: store.styleRange)
@@ -892,43 +892,10 @@ private struct WeeklyChartCard: View {
         .chartYAxisLabel("Hours")
         .chartLegend(.hidden)
         .frame(height: 300)
-        .animation(.easeInOut(duration: 0.15), value: store.highlightedSegmentKey)
+        // The cursor-tracking tooltip + hover resolution lives in its own view so
+        // per-sample pointer moves repaint only the tooltip, not the whole Chart.
         .chartOverlay { proxy in
-            GeometryReader { geo in
-                ZStack(alignment: .topLeading) {
-                    Rectangle().fill(.clear).contentShape(Rectangle())
-                        .onContinuousHover { phase in
-                            switch phase {
-                            case .active(let location):
-                                guard let plotAnchor = proxy.plotFrame else { return }
-                                let plot = geo[plotAnchor]
-                                let x = location.x - plot.origin.x
-                                let y = location.y - plot.origin.y
-                                if let date: Date = proxy.value(atX: x),
-                                   let week = store.nearestWeek(to: date),
-                                   let hours: Double = proxy.value(atY: y),
-                                   let seg = store.segment(inWeek: week, atHours: hours) {
-                                    hovered = seg
-                                    hoverPoint = location
-                                    store.setHighlight(seg.key)
-                                } else {
-                                    hovered = nil
-                                    store.setHighlight(nil)
-                                }
-                            case .ended:
-                                hovered = nil
-                                store.setHighlight(nil)
-                            }
-                        }
-                    if let seg = hovered {
-                        tooltip(for: seg)
-                            .fixedSize()
-                            .offset(x: min(max(hoverPoint.x - 70, 0), geo.size.width - 150),
-                                    y: min(max(hoverPoint.y - 44, 0), geo.size.height - 44))
-                            .allowsHitTesting(false)
-                    }
-                }
-            }
+            ChartHoverOverlay(proxy: proxy, store: store, hover: hover)
         }
     }
 
@@ -940,6 +907,68 @@ private struct WeeklyChartCard: View {
         if date == store.windowWeekDates.first { return .topLeading }
         if date == store.windowWeekDates.last { return .topTrailing }
         return .top
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "chart.bar.xaxis").font(.largeTitle).foregroundStyle(.secondary)
+            Text("No data for this selection.").foregroundStyle(.secondary)
+            Text("Run Refresh to extract from Calendar.")
+                .font(.caption).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 300)
+    }
+}
+
+/// The chart's interactive layer: resolves the segment under the cursor, drives
+/// the shared cross-surface highlight, and draws the follow-the-cursor tooltip.
+/// It owns the pointer-tracking `@State` so per-sample moves repaint only this
+/// overlay -- not the `Chart` -- while the shared highlight is coalesced by
+/// `HoverHighlight` to at most one publish per frame. `store`/`hover` are read
+/// live (not observed) so pointer moves never invalidate this view via them.
+private struct ChartHoverOverlay: View {
+    let proxy: ChartProxy
+    let store: DashboardStore
+    let hover: HoverHighlight
+    @State private var hovered: DashboardStore.HoveredSegment?
+    @State private var hoverPoint: CGPoint = .zero
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                Rectangle().fill(.clear).contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location):
+                            guard let plotAnchor = proxy.plotFrame else { return }
+                            let plot = geo[plotAnchor]
+                            let x = location.x - plot.origin.x
+                            let y = location.y - plot.origin.y
+                            if let date: Date = proxy.value(atX: x),
+                               let week = store.nearestWeek(to: date),
+                               let hours: Double = proxy.value(atY: y),
+                               let seg = store.segment(inWeek: week, atHours: hours) {
+                                hovered = seg
+                                hoverPoint = location
+                                hover.setHighlight(seg.key)
+                            } else {
+                                hovered = nil
+                                hover.setHighlight(nil)
+                            }
+                        case .ended:
+                            hovered = nil
+                            hover.setHighlight(nil)
+                        }
+                    }
+                if let seg = hovered {
+                    tooltip(for: seg)
+                        .fixedSize()
+                        .offset(x: min(max(hoverPoint.x - 70, 0), geo.size.width - 150),
+                                y: min(max(hoverPoint.y - 44, 0), geo.size.height - 44))
+                        .allowsHitTesting(false)
+                }
+            }
+        }
     }
 
     private func tooltip(for seg: DashboardStore.HoveredSegment) -> some View {
@@ -958,16 +987,6 @@ private struct WeeklyChartCard: View {
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
         .shadow(radius: 6, y: 2)
     }
-
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "chart.bar.xaxis").font(.largeTitle).foregroundStyle(.secondary)
-            Text("No data for this selection.").foregroundStyle(.secondary)
-            Text("Run Refresh to extract from Calendar.")
-                .font(.caption).foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 300)
-    }
 }
 
 /// A tappable legend. At the activity level, clicking a task segment drills
@@ -975,6 +994,7 @@ private struct WeeklyChartCard: View {
 /// non-interactive.
 private struct SegmentLegend: View {
     @ObservedObject var store: DashboardStore
+    @ObservedObject var hover: HoverHighlight
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .leading)]
 
@@ -1016,14 +1036,14 @@ private struct SegmentLegend: View {
                 .padding(.vertical, 2)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(store.isHighlighted(style.key) ? Color.primary.opacity(0.08) : Color.clear)
+                        .fill(hover.isHighlighted(style.key) ? Color.primary.opacity(0.08) : Color.clear)
                 )
                 .contentShape(Rectangle())
                 .onHover { hovering in
                     if hovering {
-                        store.setHighlight(style.key)
-                    } else if store.highlightedSegmentKey == style.key {
-                        store.setHighlight(nil)
+                        hover.setHighlight(style.key)
+                    } else if hover.key == style.key {
+                        hover.setHighlight(nil)
                     }
                 }
             }

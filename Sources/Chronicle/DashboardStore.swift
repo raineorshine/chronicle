@@ -52,9 +52,16 @@ final class DashboardStore: ObservableObject {
     }
 
     /// Bucketed weekly stacks for the current scope + window.
-    @Published var stacks: WeeklyStacks = .empty
+    @Published var stacks: WeeklyStacks = .empty {
+        didSet { chartPointsCache = nil }
+    }
     /// Segment styles (display label + color) in stacking / legend order.
-    @Published var segmentStyles: [SegmentStyle] = []
+    @Published var segmentStyles: [SegmentStyle] = [] {
+        didSet {
+            styleIndexCache = nil
+            hover.setChartSegmentKeys(Set(segmentStyles.map(\.key)))
+        }
+    }
     /// Per-task color overrides (task_key -> `#RRGGBB`), mirrored from config.
     @Published var taskColors: [String: String] = [:]
     /// Rename chains mirrored from config: each is an ordered list of titles
@@ -64,10 +71,12 @@ final class DashboardStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var isRefreshing = false
 
-    /// Transient, non-persisted key of the segment currently emphasized by hover.
-    /// A single shared value drives cross-highlighting across the chart, the
-    /// legend, and the left sidebar (all keyed by the same normalized-title key).
-    @Published var highlightedSegmentKey: String? = nil
+    /// Transient hover-emphasis state driving cross-highlighting across the
+    /// chart, the legend, and the sidebar (all keyed by the same normalized-title
+    /// key). Kept as its own small `ObservableObject` — not a `@Published` on this
+    /// store — so a hover change invalidates only the hover-sensitive surfaces
+    /// instead of the entire tree that observes `DashboardStore`.
+    let hover = HoverHighlight()
 
     let allowedWeekWindows = [4, 8, 12]
 
@@ -248,8 +257,15 @@ final class DashboardStore: ObservableObject {
 
     // MARK: - Derived chart data
 
+    /// Cached key -> style lookup, rebuilt only when `segmentStyles` changes
+    /// (see its `didSet`). Avoids rebuilding a dictionary on every per-mark
+    /// `displayLabel`/`color` call during a chart render.
+    private var styleIndexCache: [String: SegmentStyle]?
     private var styleIndex: [String: SegmentStyle] {
-        Dictionary(uniqueKeysWithValues: segmentStyles.map { ($0.key, $0) })
+        if let cached = styleIndexCache { return cached }
+        let index = Dictionary(uniqueKeysWithValues: segmentStyles.map { ($0.key, $0) })
+        styleIndexCache = index
+        return index
     }
 
     /// Display label for a segment key (unique per render; disambiguated in `styles`).
@@ -262,35 +278,6 @@ final class DashboardStore: ObservableObject {
     var styleRange: [Color] { segmentStyles.map(\.color) }
 
     func color(forSegment key: String) -> Color { styleIndex[key]?.color ?? .gray }
-
-    // MARK: - Hover highlight
-
-    /// Set (or clear) the shared hover highlight. Only publishes on an actual
-    /// change so continuous hover over one segment doesn't churn the render tree.
-    func setHighlight(_ key: String?) {
-        guard highlightedSegmentKey != key else { return }
-        highlightedSegmentKey = key
-    }
-
-    /// True when the current highlight corresponds to a segment actually drawn in
-    /// the chart. Gates chart dimming so hovering a row that isn't a current chart
-    /// segment (e.g. "Other", a whole-calendar member, an uncharted task) leaves
-    /// the chart fully opaque instead of blanking it.
-    var isHighlightActiveInChart: Bool {
-        highlightedSegmentKey.map { styleIndex[$0] != nil } ?? false
-    }
-
-    /// Opacity for a chart segment given the shared highlight: the matched segment
-    /// (or every segment, when no chart segment is highlighted) stays fully opaque;
-    /// others dim.
-    func chartOpacity(forSegment key: String) -> Double {
-        (!isHighlightActiveInChart || highlightedSegmentKey == key) ? 1.0 : 0.55
-    }
-
-    /// Whether `key` is the currently highlighted segment (nil-safe).
-    func isHighlighted(_ key: String?) -> Bool {
-        key != nil && key == highlightedSegmentKey
-    }
 
     /// A resolved segment under the cursor, for the granular hover tooltip.
     struct HoveredSegment: Equatable {
@@ -373,7 +360,21 @@ final class DashboardStore: ObservableObject {
     /// Points are ordered per-week by `segmentKey`, matching the bottom→top band
     /// order that `segment(inWeek:atHours:)` walks, so hover resolution stays correct
     /// (zero-hour fillers contribute nothing and are skipped by that walk).
+    ///
+    /// Cached and invalidated only when `stacks` changes (see its `didSet`). This
+    /// series is highlight-independent, so it must not be rebuilt on every hover
+    /// re-render of the chart. Every window/data change reassigns `stacks`, so the
+    /// cache stays correct.
     var chartPoints: [WeeklyStackPoint] {
+        if let cached = chartPointsCache { return cached }
+        let points = computeChartPoints()
+        chartPointsCache = points
+        return points
+    }
+
+    private var chartPointsCache: [WeeklyStackPoint]?
+
+    private func computeChartPoints() -> [WeeklyStackPoint] {
         let weeks = windowWeekStarts
         guard !weeks.isEmpty, !stacks.segments.isEmpty else { return stacks.points }
 
