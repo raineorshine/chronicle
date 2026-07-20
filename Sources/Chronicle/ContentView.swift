@@ -293,9 +293,10 @@ private struct SelectableRow: View {
 
 /// Shared row background that folds hover into selection styling: a selected row
 /// keeps its accent tint, an un-selected highlighted row shows a subtle
-/// highlight, and everything else is clear. The change is animated for a gentle
-/// fade. Highlight is driven by the store's single shared hover key (or, for
-/// non-cross-lit rows, the row's own local hover), so at most one row lights up.
+/// highlight, and everything else is clear. Highlight is driven by the store's
+/// single shared hover key (or, for non-cross-lit rows, the row's own local
+/// hover). The tint is applied instantly (no fade) so sweeping the mouse across
+/// rows can't leave a trail of fading highlights on rows you've already left.
 private struct RowHoverBackground: View {
     let isSelected: Bool
     var isHighlighted: Bool = false
@@ -307,7 +308,7 @@ private struct RowHoverBackground: View {
     }
 
     var body: some View {
-        fill.animation(.easeInOut(duration: 0.12), value: isHighlighted)
+        fill
     }
 }
 
