@@ -13,6 +13,10 @@ struct ChronicleApp: App {
         .commands {
             NavigationCommands(store: store)
         }
+
+        Settings {
+            SettingsView(store: store)
+        }
     }
 }
 
