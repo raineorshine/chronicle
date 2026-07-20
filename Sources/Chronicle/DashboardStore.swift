@@ -639,6 +639,43 @@ final class DashboardStore: ObservableObject {
         return result
     }
 
+    /// `windowWeekStarts` as `Date`s, for the chart's continuous X axis.
+    var windowWeekDates: [Date] {
+        let f = formatter()
+        return windowWeekStarts.compactMap { f.date(from: $0) }
+    }
+
+    /// The continuous X-axis domain: first week start through last. A continuous
+    /// (vs categorical) domain places the endpoints exactly on the plot edges, so
+    /// the stacked area/bars run edge-to-edge with no side padding.
+    var windowDateDomain: ClosedRange<Date> {
+        let dates = windowWeekDates
+        guard let lo = dates.first, let hi = dates.last, lo < hi else {
+            let now = Date()
+            return now...now.addingTimeInterval(1)
+        }
+        return lo...hi
+    }
+
+    /// Short axis label for a week-start `Date`, e.g. "Jul 14".
+    func weekLabelShort(date: Date) -> String {
+        weekLabelShort(formatter().string(from: date))
+    }
+
+    /// Whether a week-start `Date` is the current (in-progress) week.
+    func isCurrentWeek(_ date: Date) -> Bool {
+        formatter().string(from: date) == currentWeekStart
+    }
+
+    /// Snaps a hovered X-axis `Date` to the nearest week-start key, for resolving
+    /// which week's stack the cursor is over on the continuous axis.
+    func nearestWeek(to date: Date) -> String? {
+        let dates = windowWeekDates
+        guard !dates.isEmpty else { return nil }
+        let nearest = dates.min { abs($0.timeIntervalSince(date)) < abs($1.timeIntervalSince(date)) }
+        return nearest.map { formatter().string(from: $0) }
+    }
+
     func setWeeksWindow(_ weeks: Int) {
         weeksWindow = weeks
         reloadData()

@@ -783,7 +783,7 @@ private struct WeeklyChartCard: View {
         Chart(store.chartPoints) { point in
             if store.chartStyle == .area {
                 AreaMark(
-                    x: .value("Week", point.weekStart),
+                    x: .value("Week", store.weekDate(point.weekStart)),
                     y: .value("Hours", point.hours)
                 )
                 .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
@@ -791,7 +791,7 @@ private struct WeeklyChartCard: View {
                 .opacity(1.0)
             } else {
                 BarMark(
-                    x: .value("Week", point.weekStart),
+                    x: .value("Week", store.weekDate(point.weekStart)),
                     y: .value("Hours", point.hours)
                 )
                 .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
@@ -799,13 +799,13 @@ private struct WeeklyChartCard: View {
             }
         }
         .chartForegroundStyleScale(domain: store.styleDomain, range: store.styleRange)
-        .chartXScale(domain: store.windowWeekStarts)
+        .chartXScale(domain: store.windowDateDomain)
         .chartXAxis {
-            AxisMarks(values: store.windowWeekStarts) { value in
-                if let week = value.as(String.self) {
-                    AxisValueLabel {
-                        Text(store.weekLabelShort(week))
-                            + Text(week == store.currentWeekStart ? " •" : "")
+            AxisMarks(values: store.windowWeekDates) { value in
+                if let date = value.as(Date.self) {
+                    AxisValueLabel(anchor: axisLabelAnchor(for: date)) {
+                        Text(store.weekLabelShort(date: date))
+                            + Text(store.isCurrentWeek(date) ? " •" : "")
                     }
                 }
             }
@@ -824,7 +824,8 @@ private struct WeeklyChartCard: View {
                                 let plot = geo[plotAnchor]
                                 let x = location.x - plot.origin.x
                                 let y = location.y - plot.origin.y
-                                if let week: String = proxy.value(atX: x),
+                                if let date: Date = proxy.value(atX: x),
+                                   let week = store.nearestWeek(to: date),
                                    let hours: Double = proxy.value(atY: y),
                                    let seg = store.segment(inWeek: week, atHours: hours) {
                                     hovered = seg
@@ -846,6 +847,16 @@ private struct WeeklyChartCard: View {
                 }
             }
         }
+    }
+
+    /// Because the X scale is continuous with its domain pinned to the first and
+    /// last week, those points sit flush against the plot edges. Anchor their
+    /// labels inward (leading / trailing) so they extend into the plot instead of
+    /// clipping off the sides; interior labels stay centered on their tick.
+    private func axisLabelAnchor(for date: Date) -> UnitPoint {
+        if date == store.windowWeekDates.first { return .topLeading }
+        if date == store.windowWeekDates.last { return .topTrailing }
+        return .top
     }
 
     private func tooltip(for seg: DashboardStore.HoveredSegment) -> some View {
