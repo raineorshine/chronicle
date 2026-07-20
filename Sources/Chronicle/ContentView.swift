@@ -8,7 +8,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $store.columnVisibility) {
             HierarchySidebar(store: store)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {

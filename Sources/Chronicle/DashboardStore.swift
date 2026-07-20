@@ -14,6 +14,10 @@ final class DashboardStore: ObservableObject {
     @Published var selection: HierarchySelection = .all
     @Published var selectedNodeID: String = "all"
 
+    /// Visibility of the navigation sidebar column. Bound to the
+    /// `NavigationSplitView` so menu commands can expand/collapse it.
+    @Published var columnVisibility: NavigationSplitViewVisibility = .all
+
     /// Number of trailing weeks shown on the X axis (includes the current,
     /// in-progress week). One of `allowedWeekWindows`.
     @Published var weeksWindow: Int = 4
@@ -505,6 +509,11 @@ final class DashboardStore: ObservableObject {
     /// Selects the "All Tasks" home scope (⌘0 / ⌘⇧H).
     func selectHome() {
         select(.all, nodeID: "all")
+    }
+
+    /// Expands or collapses the navigation sidebar (⌘\ / ⌘B).
+    func toggleSidebar() {
+        columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
     }
 
     /// Selects the Nth top-level activity (1-based, matching ⌘1…⌘9). No-op when
