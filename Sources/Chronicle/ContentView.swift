@@ -268,13 +268,16 @@ private struct DashboardDetail: View {
                 errorBanner(message)
             }
             WeeklyChartCard(store: store)
-            Spacer()
+                .frame(maxHeight: .infinity)
         }
         .padding(20)
         .frame(minWidth: 640, minHeight: 460, maxHeight: .infinity, alignment: .top)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 CalendarPickerButton(store: store)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                AliasPickerButton(store: store)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -368,6 +371,123 @@ private struct CalendarPickerButton: View {
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
             CalendarPicker(store: store)
         }
+    }
+}
+
+// MARK: - Rename aliases
+
+private struct AliasPickerButton: View {
+    @ObservedObject var store: DashboardStore
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            Label("Aliases", systemImage: "arrow.triangle.merge")
+        }
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            AliasPicker(store: store)
+        }
+    }
+}
+
+/// Manages rename chains: each links titles that are renames of the same task
+/// so they merge across all metrics. Adding `old → new` extends the matching
+/// chain (or starts one), so a task renamed repeatedly grows a single chain.
+private struct AliasPicker: View {
+    @ObservedObject var store: DashboardStore
+    @State private var oldTitle = ""
+    @State private var newTitle = ""
+
+    private var canAdd: Bool {
+        !oldTitle.trimmingCharacters(in: .whitespaces).isEmpty
+            && !newTitle.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private func add() {
+        guard canAdd else { return }
+        store.addRename(from: oldTitle, to: newTitle)
+        oldTitle = ""
+        newTitle = ""
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Aliases").font(.headline)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            Divider()
+
+            if store.aliasChains.isEmpty {
+                Text("No aliases yet.")
+                    .foregroundStyle(.secondary)
+                    .padding(14)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(store.aliasChains.enumerated()), id: \.offset) { index, chain in
+                            AliasChainRow(chain: chain) { store.removeAliasChain(at: index) }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .frame(maxHeight: 260)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Old title", text: $oldTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(add)
+                HStack(spacing: 6) {
+                    TextField("New title", text: $newTitle)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(add)
+                    Button("Add", action: add)
+                        .disabled(!canAdd)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Text("Links titles that are renames of the same task so they merge "
+                 + "across all metrics. Adding a rename whose old title matches "
+                 + "an existing chain's newest title extends that chain.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+        }
+        .frame(width: 320)
+    }
+}
+
+private struct AliasChainRow: View {
+    let chain: [String]
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(chain.joined(separator: "  →  "))
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                onDelete()
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Remove this alias")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
     }
 }
 
@@ -646,8 +766,12 @@ private struct WeeklyChartCard: View {
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     chart
-                    SegmentLegend(store: store)
+                    ScrollView {
+                        SegmentLegend(store: store)
+                    }
+                    .frame(maxHeight: .infinity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .padding(16)
@@ -688,7 +812,7 @@ private struct WeeklyChartCard: View {
         }
         .chartYAxisLabel("Hours")
         .chartLegend(.hidden)
-        .frame(minHeight: 300)
+        .frame(height: 300)
         .chartOverlay { proxy in
             GeometryReader { geo in
                 ZStack(alignment: .topLeading) {

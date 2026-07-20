@@ -35,6 +35,14 @@ public struct ChronicleConfig: Codable, Equatable {
     /// without an entry fall back to a stable auto-color derived from their key.
     public var taskColors: [String: String]
 
+    /// Ordered title-rename chains. Each chain is a list of raw event titles
+    /// where the **last** entry is the canonical (newest) title and every
+    /// earlier entry is an alias that merges into it. A chain models a task
+    /// renamed one or more times over time, e.g.
+    /// `["VP of Engineering", "em - Code Reviews", "em - Engineering Lead"]`.
+    /// Display-only: applied at read time, so changing it never re-extracts.
+    public var aliasChains: [[String]]
+
     /// Weekday on which the sidebar/legend tallies switch from the previous
     /// (just-completed) week to the current, in-progress week. Uses Foundation's
     /// weekday numbering (1 = Sunday … 7 = Saturday). Before this weekday the
@@ -50,6 +58,7 @@ public struct ChronicleConfig: Codable, Equatable {
                 windowPastDays: Int = 60,
                 windowFutureDays: Int = 14,
                 taskColors: [String: String] = [:],
+                aliasChains: [[String]] = [],
                 weeklyMetricsCutoff: Int = 6) {
         self.calendarAllowlist = calendarAllowlist
         self.subtaskSeparators = subtaskSeparators
@@ -58,6 +67,7 @@ public struct ChronicleConfig: Codable, Equatable {
         self.windowPastDays = windowPastDays
         self.windowFutureDays = windowFutureDays
         self.taskColors = taskColors
+        self.aliasChains = aliasChains
         self.weeklyMetricsCutoff = weeklyMetricsCutoff
     }
 
@@ -66,6 +76,7 @@ public struct ChronicleConfig: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case calendarAllowlist, subtaskSeparators, subtractiveCalendars
         case wholeCalendarSegments, windowPastDays, windowFutureDays, taskColors
+        case aliasChains
         case weeklyMetricsCutoff
         // Legacy single-separator key, decoded for migration only.
         case subtaskSeparator
@@ -90,6 +101,7 @@ public struct ChronicleConfig: Codable, Equatable {
         windowPastDays = try c.decodeIfPresent(Int.self, forKey: .windowPastDays) ?? d.windowPastDays
         windowFutureDays = try c.decodeIfPresent(Int.self, forKey: .windowFutureDays) ?? d.windowFutureDays
         taskColors = try c.decodeIfPresent([String: String].self, forKey: .taskColors) ?? d.taskColors
+        aliasChains = try c.decodeIfPresent([[String]].self, forKey: .aliasChains) ?? d.aliasChains
         weeklyMetricsCutoff = try c.decodeIfPresent(Int.self, forKey: .weeklyMetricsCutoff) ?? d.weeklyMetricsCutoff
     }
 
@@ -104,6 +116,7 @@ public struct ChronicleConfig: Codable, Equatable {
         try c.encode(windowPastDays, forKey: .windowPastDays)
         try c.encode(windowFutureDays, forKey: .windowFutureDays)
         try c.encode(taskColors, forKey: .taskColors)
+        try c.encode(aliasChains, forKey: .aliasChains)
         try c.encode(weeklyMetricsCutoff, forKey: .weeklyMetricsCutoff)
     }
 

@@ -135,9 +135,12 @@ final class DumpController {
 Driver loop (note: `kill` here needs a literal numeric PID, not a variable):
 
 ```bash
-APP="$HOME/Library/Developer/Xcode/DerivedData/Chronicle-*/Build/Products/Debug/Chronicle.app"
-printf 'all\n'  > /tmp/chronicle_dump.txt; open $APP; sleep 7   # captures /tmp/win_all.png
-printf 'task\n' > /tmp/chronicle_dump.txt; open $APP; sleep 7   # captures /tmp/win_task.png
+# Ask xcodebuild for the exact products dir (worktree-correct; don't glob DerivedData)
+PRODUCTS_DIR=$(xcodebuild -showBuildSettings -scheme Chronicle -destination 'platform=macOS' 2>/dev/null \
+  | awk -F' = ' '/ BUILT_PRODUCTS_DIR = /{print $2; exit}')
+APP="$PRODUCTS_DIR/Chronicle.app"
+printf 'all\n'  > /tmp/chronicle_dump.txt; open "$APP"; sleep 7   # captures /tmp/win_all.png
+printf 'task\n' > /tmp/chronicle_dump.txt; open "$APP"; sleep 7   # captures /tmp/win_task.png
 rm -f /tmp/chronicle_dump.txt                                    # so normal launches are unaffected
 ```
 
@@ -194,9 +197,17 @@ band positions are directly comparable.
   `onAppear`. A direct exec stays hidden.
 - **`kill` in this agent needs a literal PID.** `pgrep`, then `kill <number>`;
   `kill "$var"` / loops over variables are rejected.
-- **DerivedData path is not stable.** It changes across `xcodegen generate`
-  runs; glob `Chronicle-*/Build/Products/Debug/Chronicle.app` instead of
-  hardcoding the hash.
+- **DerivedData path is not stable, and there are many of them.** It changes
+  across `xcodegen generate` runs, and every worktree gets its own
+  `Chronicle-<hash>` dir — often 30+. Do **not** glob
+  `Chronicle-*/Build/Products/Debug/Chronicle.app` and take `head -1`/`ls`; the
+  first match is alphabetical, not current, so it's usually a stale build from a
+  different worktree. Ask xcodebuild for the exact dir instead:
+  ```bash
+  PRODUCTS_DIR=$(xcodebuild -showBuildSettings -scheme Chronicle -destination 'platform=macOS' 2>/dev/null \
+    | awk -F' = ' '/ BUILT_PRODUCTS_DIR = /{print $2; exit}')
+  # "$PRODUCTS_DIR/Chronicle.app"
+  ```
 
 ## Build & run recap
 
