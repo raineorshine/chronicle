@@ -92,7 +92,7 @@ public final class CalendarExtractor {
                 if event.isAllDay { continue }
                 guard let start = event.startDate, let end = event.endDate else { continue }
                 guard let parsed = TitleParser.parse(event.title ?? "",
-                                                     separator: config.subtaskSeparator) else { continue }
+                                                     separators: config.subtaskSeparators) else { continue }
                 let isSubtractive = subtractive.contains(Self.normalize(event.calendar.title))
                 inputs.append(EventInput(calendar: TitleParser.normalize(event.calendar.title),
                                          title: parsed,

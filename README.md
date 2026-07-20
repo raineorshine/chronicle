@@ -99,18 +99,20 @@ Your choices are stored in a config file (you normally don't edit this by hand):
 ```json
 {
   "calendarAllowlist": ["Work", "Personal"],
-  "subtaskSeparator": " - ",
+  "subtaskSeparators": [" - ", " | "],
   "subtractiveCalendars": ["Instagram"],
   "aliasChains": [["VP of Engineering", "em - Code Reviews"]],
   "windowPastDays": 60,
-  "windowFutureDays": 14
+  "windowFutureDays": 14,
+  "weeklyMetricsCutoff": 6
 }
 ```
 
 - **calendarAllowlist** — only these calendar names are extracted (matched
   case-insensitively). Managed via the in-app **Calendars** picker; an empty
   list extracts nothing.
-- **subtaskSeparator** — the only substring treated as a Task/Subtask divider.
+- **subtaskSeparators** — substrings treated as Task/Subtask dividers; a title
+  is split on the leftmost occurrence of any of them (default `[" - ", " | "]`).
 - **subtractiveCalendars** — calendar names (case-insensitive) treated as
   *subtractive*: their time is subtracted from overlapping events in other
   calendars, while their own time is still counted in full (see below). A
@@ -120,6 +122,11 @@ Your choices are stored in a config file (you normally don't edit this by hand):
   picker.
 - **windowPastDays / windowFutureDays** — the rolling window that is rebuilt on
   every run (previous 60 days, today, next 14 days by default).
+- **weeklyMetricsCutoff** — the weekday (1 = Sunday … 7 = Saturday) when the
+  sidebar and legend hour tallies roll over to the current week. Before it, the
+  tallies show the whole previous week (Mon–Sun); on or after it, they show the
+  current week (Mon–today). Defaults to `6` (Friday), so Mon–Thu show last week
+  and Fri–Sun show this week.
 
 ## Subtractive calendars
 
@@ -277,7 +284,7 @@ the demo rows are automatically replaced the first time you extract real data.
 
 ## How it works
 
-- **Parsing.** Titles are split on `" - "` into Task/Subtask, then each part is
+- **Parsing.** Titles are split on `" - "` or `" | "` into Task/Subtask, then each part is
   NFC-normalized, stripped of emoji, parenthesized metadata, and punctuation,
   whitespace-collapsed, and trimmed. A lowercased **key** is used for grouping;
   the cleaned original casing is kept as the **label**.

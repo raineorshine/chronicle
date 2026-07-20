@@ -34,21 +34,21 @@ public enum AliasResolver {
 
     /// Flattens `aliasChains` into alias edges. For each chain, the **last**
     /// parseable title is the canonical target and every earlier parseable
-    /// title becomes an alias into it. Titles are parsed with `separator` (the
+    /// title becomes an alias into it. Titles are parsed with `separators` (the
     /// same rules the extractor uses) so keys line up with `daily_time`.
     ///
     /// Self-maps (an entry whose identity equals the canonical) and unparseable
     /// entries are skipped. If the same `from` identity appears in more than one
     /// chain, the later chain wins.
     public static func resolve(chains: [[String]],
-                               separator: String = " - ") -> [ResolvedAlias] {
+                               separators: [String] = [" - ", " | "]) -> [ResolvedAlias] {
         // Keyed by (fromTaskKey, fromSubtaskKey) so cross-chain duplicates
         // collapse deterministically (last chain wins) and ordering is stable.
         var order: [String] = []
         var byKey: [String: ResolvedAlias] = [:]
 
         for chain in chains {
-            let parsed = chain.compactMap { TitleParser.parse($0, separator: separator) }
+            let parsed = chain.compactMap { TitleParser.parse($0, separators: separators) }
             guard parsed.count >= 2, let canonical = parsed.last else { continue }
 
             for title in parsed.dropLast() {

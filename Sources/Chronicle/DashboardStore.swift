@@ -59,6 +59,11 @@ final class DashboardStore: ObservableObject {
     /// `daily_time.calendar_key`), passed to the bucketing to fold their tasks.
     private var wholeCalendarKeys: Set<String> = []
 
+    /// Weekday (Foundation numbering, 1 = Sunday … 7 = Saturday) at which the
+    /// sidebar/legend tallies switch from the previous full week to the current
+    /// week. Mirrors `ChronicleConfig.weeklyMetricsCutoff`; defaults to Friday.
+    private var weeklyMetricsCutoff: Int = 6
+
     /// Week boundaries always start on Monday, independent of the locale's
     /// default first weekday.
     private let calendar: Calendar = {
@@ -107,10 +112,24 @@ final class DashboardStore: ObservableObject {
         return (f.string(from: fromDate), f.string(from: today))
     }
 
-    /// Inclusive `yyyy-MM-dd` bounds covering the current (in-progress) week,
-    /// from its Monday start up to today.
-    var currentWeekBounds: (from: String, to: String) {
-        (currentWeekStart, dateBounds.to)
+    /// `yyyy-MM-dd` of the first day of the metrics week — the just-completed
+    /// week the sidebar/legend tallies cover. Before `weeklyMetricsCutoff` this
+    /// is the previous week; on or after it, the current week.
+    var metricsWeekStart: String {
+        let start = WeeklyMetrics.weekStart(for: Date(),
+                                            cutoffWeekday: weeklyMetricsCutoff,
+                                            calendar: calendar)
+        return formatter().string(from: start)
+    }
+
+    /// Inclusive `yyyy-MM-dd` bounds of the metrics week: a full Mon–Sun span
+    /// for a previous week, or Monday-to-today for the current week.
+    var metricsWeekBounds: (from: String, to: String) {
+        let f = formatter()
+        let bounds = WeeklyMetrics.bounds(for: Date(),
+                                          cutoffWeekday: weeklyMetricsCutoff,
+                                          calendar: calendar)
+        return (f.string(from: bounds.from), f.string(from: bounds.to))
     }
 
     // MARK: - Scope -> query dimension
@@ -168,8 +187,8 @@ final class DashboardStore: ObservableObject {
         segmentStyles = Self.styles(for: stacks.segments,
                                     dimension: plan.dimension,
                                     overrides: taskColors)
-        // Sidebar lists the window's activities but tallies only the current week.
-        let week = currentWeekBounds
+        // Sidebar lists the window's activities but tallies only the metrics week.
+        let week = metricsWeekBounds
         taskList = try db.taskSummaries(windowFrom: bounds.from, windowTo: bounds.to,
                                         hoursFrom: week.from, hoursTo: week.to)
         totals = try db.totals(selection: selection, from: bounds.from, to: bounds.to)
@@ -237,18 +256,18 @@ final class DashboardStore: ObservableObject {
     func weekDate(_ week: String) -> Date { formatter().date(from: week) ?? Date() }
 
 
-    /// Total recorded hours across all listed tasks for the current week — the
+    /// Total recorded hours across all listed tasks for the metrics week — the
     /// denominator for each sidebar task's weekly share bar.
     var weeklyHoursTotal: Double {
         taskList.reduce(0) { $0 + $1.hours }
     }
 
-    /// Hours in the current (in-progress) week per segment key. Derived from the
-    /// already-bucketed `stacks.points`, matching the "current week" definition
-    /// used for the sidebar tallies (`currentWeekStart`). Segments absent from
-    /// the current week are simply missing (callers treat that as zero).
-    var currentWeekHoursBySegment: [String: Double] {
-        let week = currentWeekStart
+    /// Hours in the metrics week per segment key. Derived from the already-
+    /// bucketed `stacks.points`, matching the "metrics week" definition used for
+    /// the sidebar tallies (`metricsWeekStart`). Segments absent from the metrics
+    /// week are simply missing (callers treat that as zero).
+    var metricsWeekHoursBySegment: [String: Double] {
+        let week = metricsWeekStart
         var byKey: [String: Double] = [:]
         for p in stacks.points where p.weekStart == week {
             byKey[p.segmentKey, default: 0] += p.hours
@@ -580,6 +599,7 @@ final class DashboardStore: ObservableObject {
             wholeCalendarKeys = Set(config.wholeCalendarSegments.map { TitleParser.normalize($0).key })
             taskColors = config.taskColors
             aliasChains = config.aliasChains
+            weeklyMetricsCutoff = config.weeklyMetricsCutoff
         }
     }
 

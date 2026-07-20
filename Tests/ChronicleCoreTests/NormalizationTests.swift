@@ -31,6 +31,29 @@ final class NormalizationTests: XCTestCase {
         XCTAssertEqual(parsed?.subtask?.key, "accounting")
     }
 
+    func testPipeSeparatorSplit() {
+        // "em | Code Reviews" -> task: em, subtask: Code Reviews
+        let parsed = TitleParser.parse("em | Code Reviews")
+        XCTAssertEqual(parsed?.task.label, "em")
+        XCTAssertEqual(parsed?.subtask?.label, "Code Reviews")
+        XCTAssertEqual(parsed?.subtask?.key, "code reviews")
+    }
+
+    func testLeftmostSeparatorWinsAcrossDelimiters() {
+        // "a - b | c" -> split at the leftmost separator; the rest stays in the subtask.
+        let parsed = TitleParser.parse("a - b | c")
+        XCTAssertEqual(parsed?.task.label, "a")
+        // The pipe is stripped as punctuation during normalization of the subtask.
+        XCTAssertEqual(parsed?.subtask?.label, "b c")
+    }
+
+    func testPipeWithoutSpacesIsNotSplit() {
+        // No spaces around the pipe -> not a separator.
+        let parsed = TitleParser.parse("a|b")
+        XCTAssertNil(parsed?.subtask)
+        XCTAssertEqual(parsed?.task.label, "ab") // pipe stripped as punctuation
+    }
+
     func testPlainTaskHasNoSubtask() {
         let parsed = TitleParser.parse("em")
         XCTAssertEqual(parsed?.task.key, "em")
