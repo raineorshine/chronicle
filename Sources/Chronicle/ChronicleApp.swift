@@ -22,6 +22,14 @@ private struct NavigationCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Navigate") {
+            Button("Toggle Sidebar") { store.toggleSidebar() }
+                .keyboardShortcut("\\", modifiers: .command)
+            // Second binding for the same action; a button takes one shortcut.
+            Button("Toggle Sidebar (⌘B)") { store.toggleSidebar() }
+                .keyboardShortcut("b", modifiers: .command)
+
+            Divider()
+
             Button("All Tasks") { store.selectHome() }
                 .keyboardShortcut("1", modifiers: .command)
             // Second binding for the same action; a button takes one shortcut.
