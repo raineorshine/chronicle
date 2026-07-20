@@ -290,6 +290,7 @@ private struct DashboardDetail: View {
                     }
                 }
                 .disabled(store.isRefreshing)
+                .help("Reload calendar data")
             }
         }
     }
@@ -362,6 +363,7 @@ private struct CalendarPickerButton: View {
         } label: {
             Label("Calendars", systemImage: "calendar")
         }
+        .help("Choose which calendars to include")
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
             CalendarPicker(store: store)
         }
@@ -380,6 +382,7 @@ private struct AliasPickerButton: View {
         } label: {
             Label("Aliases", systemImage: "arrow.triangle.merge")
         }
+        .help("Merge renamed tasks together")
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
             AliasPicker(store: store)
         }
