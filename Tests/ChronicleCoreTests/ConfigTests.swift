@@ -44,4 +44,24 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(decoded.subtaskSeparators, [" - ", " | "])
         XCTAssertEqual(decoded, config)
     }
+
+    func testWeeklyMetricsCutoffDefaultsToFriday() {
+        XCTAssertEqual(ChronicleConfig.default.weeklyMetricsCutoff, 6)
+    }
+
+    func testRoundTripPreservesWeeklyMetricsCutoff() throws {
+        let config = ChronicleConfig(weeklyMetricsCutoff: 3)
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(ChronicleConfig.self, from: data)
+        XCTAssertEqual(decoded.weeklyMetricsCutoff, 3)
+        XCTAssertEqual(decoded, config)
+    }
+
+    func testTolerantDecodeDefaultsMissingWeeklyMetricsCutoff() throws {
+        // A config written before the cutoff key existed still loads.
+        let json = #"{"calendarAllowlist":["Work"]}"#
+        let decoded = try JSONDecoder().decode(ChronicleConfig.self,
+                                               from: Data(json.utf8))
+        XCTAssertEqual(decoded.weeklyMetricsCutoff, 6)
+    }
 }

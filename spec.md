@@ -329,6 +329,11 @@ Configuration is a JSON file created on first run:
     via a per-calendar minus toggle. Marking a calendar subtractive also
     includes it.
 -   `windowPastDays` / `windowFutureDays` — the rolling window (default 60 / 14).
+-   `weeklyMetricsCutoff` — weekday (Foundation numbering, 1 = Sunday … 7 =
+    Saturday) at which the sidebar and legend hour tallies roll over from the
+    just-completed week to the current week. Before this weekday the tallies
+    cover the whole previous week (Mon–Sun); on or after it they cover the
+    current week (Mon–today). Defaults to `6` (Friday).
 
 The SQLite database lives at
 `~/Library/Application Support/Chronicle/chronicle.db`.

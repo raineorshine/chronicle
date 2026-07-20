@@ -745,7 +745,7 @@ private struct SegmentLegend: View {
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .leading)]
 
     var body: some View {
-        let weekHours = store.currentWeekHoursBySegment
+        let weekHours = store.metricsWeekHoursBySegment
         LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
             ForEach(store.segmentStyles) { style in
                 let isCalendarBucket = WeeklyBucketing.isCalendarBucketKey(style.key)
