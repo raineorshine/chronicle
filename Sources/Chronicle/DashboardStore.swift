@@ -24,6 +24,9 @@ final class DashboardStore: ObservableObject {
     @Published var segmentStyles: [SegmentStyle] = []
     /// Per-task color overrides (task_key -> `#RRGGBB`), mirrored from config.
     @Published var taskColors: [String: String] = [:]
+    /// Rename chains mirrored from config: each is an ordered list of titles
+    /// whose last entry is the canonical (newest) name. Drives the Aliases UI.
+    @Published var aliasChains: [[String]] = []
     @Published var totals: RangeTotals = .zero
     @Published var errorMessage: String?
     @Published var isRefreshing = false
@@ -73,7 +76,10 @@ final class DashboardStore: ObservableObject {
 
     private func openDatabase() throws -> Database {
         try ChroniclePaths.ensureSupportDirectory()
-        return try Database(path: dbPath)
+        let db = try Database(path: dbPath)
+        // Apply read-time rename aliases so every query merges renamed tasks.
+        try db.setAliases(AliasResolver.resolve(chains: aliasChains))
+        return db
     }
 
     // MARK: - Range
@@ -408,6 +414,63 @@ final class DashboardStore: ObservableObject {
         }
     }
 
+    // MARK: - Rename aliases
+
+    /// Normalized comparison key for a raw title, matching how the extractor and
+    /// queries key tasks/subtasks. Used to detect duplicates and locate the
+    /// chain a new rename should extend.
+    private static func titleKey(_ raw: String) -> String? {
+        guard let parsed = TitleParser.parse(raw) else { return nil }
+        return "\(parsed.task.key)\u{1F}\(parsed.subtask?.key ?? "")"
+    }
+
+    /// Records that `from` was renamed to `to`. If an existing chain's canonical
+    /// (last) title matches `from`, `to` is appended to it — this is how a chain
+    /// grows across successive renames; otherwise a new two-entry chain is
+    /// created. Persists to config and reloads (read-time, no re-extraction).
+    /// No-op when either title is unparseable or the pair already exists.
+    func addRename(from: String, to: String) {
+        guard let fromKey = Self.titleKey(from),
+              let toKey = Self.titleKey(to),
+              fromKey != toKey else { return }
+        do {
+            var config = try ChronicleConfig.load()
+            if let idx = config.aliasChains.firstIndex(where: {
+                guard let last = $0.last else { return false }
+                return Self.titleKey(last) == fromKey
+            }) {
+                // Avoid a no-op if `to` is already the chain's canonical.
+                if Self.titleKey(config.aliasChains[idx].last ?? "") != toKey {
+                    config.aliasChains[idx].append(to)
+                }
+            } else {
+                config.aliasChains.append([from, to])
+            }
+            try saveAliasChains(config)
+        } catch {
+            errorMessage = "\(error)"
+        }
+    }
+
+    /// Removes the entire rename chain at `index`.
+    func removeAliasChain(at index: Int) {
+        do {
+            var config = try ChronicleConfig.load()
+            guard config.aliasChains.indices.contains(index) else { return }
+            config.aliasChains.remove(at: index)
+            try saveAliasChains(config)
+        } catch {
+            errorMessage = "\(error)"
+        }
+    }
+
+    private func saveAliasChains(_ config: ChronicleConfig) throws {
+        try config.save()
+        aliasChains = config.aliasChains
+        reloadData()
+        objectWillChange.send()
+    }
+
     // MARK: - Selection
 
     /// A human-readable path for the current selection, derived from labels.
@@ -535,6 +598,7 @@ final class DashboardStore: ObservableObject {
             wholeCalendarTitleKeys = Set(config.wholeCalendarSegments.map(Self.normalizeTitle))
             wholeCalendarKeys = Set(config.wholeCalendarSegments.map { TitleParser.normalize($0).key })
             taskColors = config.taskColors
+            aliasChains = config.aliasChains
             weeklyMetricsCutoff = config.weeklyMetricsCutoff
         }
     }

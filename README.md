@@ -101,6 +101,7 @@ Your choices are stored in a config file (you normally don't edit this by hand):
   "calendarAllowlist": ["Work", "Personal"],
   "subtaskSeparators": [" - ", " | "],
   "subtractiveCalendars": ["Instagram"],
+  "aliasChains": [["VP of Engineering", "em - Code Reviews"]],
   "windowPastDays": 60,
   "windowFutureDays": 14,
   "weeklyMetricsCutoff": 6
@@ -116,6 +117,9 @@ Your choices are stored in a config file (you normally don't edit this by hand):
   *subtractive*: their time is subtracted from overlapping events in other
   calendars, while their own time is still counted in full (see below). A
   subtractive calendar is always extracted, even if not in the allowlist.
+- **aliasChains** — rename chains that merge titles referring to the same task
+  (see [Aliases](#aliases-renamed-tasks)). Managed via the in-app **Aliases**
+  picker.
 - **windowPastDays / windowFutureDays** — the rolling window that is rebuilt on
   every run (previous 60 days, today, next 14 days by default).
 - **weeklyMetricsCutoff** — the weekday (1 = Sunday … 7 = Saturday) when the
@@ -141,6 +145,34 @@ To mark a calendar subtractive, open the **Calendars** picker and click the
 minus-circle icon next to it. Marking a calendar subtractive also includes it,
 since its own time is still counted. Subtractive calendars do not subtract from
 each other.
+
+## Aliases (renamed tasks)
+
+When you rename a task in your calendar, its old and new titles would otherwise
+count as two separate activities. **Aliases** link them so they roll up as one
+task for every metric — hours, occurrences, the sidebar, the chart, and
+drill-downs.
+
+Open the **Aliases** button in the toolbar and add an `old title → new title`
+pair. Renames form a **chain over time**: if the old title you enter matches the
+newest title of an existing chain, the new title extends that chain, so a task
+renamed repeatedly still collapses to its latest name. For example:
+
+```text
+VP of Engineering  →  em - Code Reviews  →  em - Engineering Lead
+```
+
+all count as `em - Engineering Lead` (which shows up under the `em` activity and
+its `Engineering Lead` subtask).
+
+Notes:
+
+- Aliases are applied **at read time**, so they take effect immediately on
+  already-extracted data — no re-extraction or Calendar access needed.
+- Matching is by **exact title**: an alias from a bare task (`VP of
+  Engineering`, no subtask) only remaps events with that exact title. Subtasked
+  variants like `VP of Engineering - accounting` need their own alias.
+- Titles merge across **all dates** and across calendars.
 
 ## Granting Calendar access
 

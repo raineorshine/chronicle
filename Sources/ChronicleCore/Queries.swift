@@ -197,7 +197,7 @@ extension Database {
         let (whereSQL, binds) = whereClause(selection, from: from, to: to)
         let sql = """
         SELECT date, SUM(duration_seconds), SUM(occurrence_count)
-        FROM daily_time
+        FROM canonical_time
         WHERE \(whereSQL)
         GROUP BY date
         ORDER BY date;
@@ -227,7 +227,7 @@ extension Database {
         let (whereSQL, binds) = whereClause(selection, from: from, to: to)
         let sql = """
         SELECT COALESCE(SUM(duration_seconds), 0), COALESCE(SUM(occurrence_count), 0)
-        FROM daily_time
+        FROM canonical_time
         WHERE \(whereSQL);
         """
         let stmt = try prepare(sql)
@@ -250,7 +250,7 @@ extension Database {
         let sql = """
         SELECT date, calendar_key, MAX(calendar_label), MAX(calendar_color),
                SUM(duration_seconds)
-        FROM daily_time
+        FROM canonical_time
         WHERE \(whereSQL)
         GROUP BY date, calendar_key
         ORDER BY date, MAX(calendar_label);
@@ -292,7 +292,7 @@ extension Database {
         case .task:
             sql = """
             SELECT date, task_key, MAX(task_label), SUM(duration_seconds)
-            FROM daily_time
+            FROM canonical_time
             WHERE \(whereSQL)
             GROUP BY date, task_key
             ORDER BY date;
@@ -300,7 +300,7 @@ extension Database {
         case .subtask:
             sql = """
             SELECT date, subtask_key, MAX(subtask_label), SUM(duration_seconds)
-            FROM daily_time
+            FROM canonical_time
             WHERE \(whereSQL)
             GROUP BY date, subtask_key
             ORDER BY date;
@@ -348,7 +348,7 @@ extension Database {
         let sql = """
         SELECT date, task_key, MAX(task_label), calendar_key,
                MAX(calendar_label), MAX(calendar_color), SUM(duration_seconds)
-        FROM daily_time
+        FROM canonical_time
         WHERE date >= ? AND date <= ?
         GROUP BY date, task_key, calendar_key
         ORDER BY date;
@@ -385,7 +385,7 @@ extension Database {
         let sql = """
         SELECT DISTINCT calendar_key, calendar_label, task_key, task_label,
                         subtask_key, subtask_label, calendar_color
-        FROM daily_time
+        FROM canonical_time
         ORDER BY calendar_label, task_label, subtask_label;
         """
         let stmt = try prepare(sql)
@@ -468,7 +468,7 @@ extension Database {
                MAX(CASE WHEN subtask_label IS NOT NULL
                         THEN date || char(31) || subtask_label END),
                SUM(CASE WHEN date >= ? AND date <= ? THEN duration_seconds ELSE 0 END)
-        FROM daily_time
+        FROM canonical_time
         WHERE date >= ? AND date <= ?
         GROUP BY task_key, subtask_key
         ORDER BY task_key;
