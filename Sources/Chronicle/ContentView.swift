@@ -50,6 +50,8 @@ private struct TaskRow: View {
     @ObservedObject var store: DashboardStore
     let task: TaskSummary
 
+    @State private var isHovering = false
+
     private var nodeID: String { "task:\(task.key)" }
 
     var body: some View {
@@ -98,8 +100,9 @@ private struct TaskRow: View {
             HoursShareBar(fraction: shareFraction,
                           color: store.taskColor(forKey: task.key))
         }
-        .listRowBackground(store.selectedNodeID == nodeID
-                           ? Color.accentColor.opacity(0.18) : Color.clear)
+        .onHover { isHovering = $0 }
+        .listRowBackground(RowHoverBackground(isSelected: store.selectedNodeID == nodeID,
+                                              isHovering: isHovering))
     }
 
     /// This task's share of the week's total recorded hours (0...1).
@@ -231,6 +234,8 @@ private struct SelectableRow: View {
     var detail: String? = nil
     let action: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
@@ -251,7 +256,26 @@ private struct SelectableRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowBackground(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+        .onHover { isHovering = $0 }
+        .listRowBackground(RowHoverBackground(isSelected: isSelected, isHovering: isHovering))
+    }
+}
+
+/// Shared row background that folds hover into selection styling: a selected row
+/// keeps its accent tint, an un-selected hovered row shows a subtle highlight,
+/// and everything else is clear. The change is animated for a gentle fade.
+private struct RowHoverBackground: View {
+    let isSelected: Bool
+    let isHovering: Bool
+
+    private var fill: Color {
+        if isSelected { return Color.accentColor.opacity(0.18) }
+        if isHovering { return Color.primary.opacity(0.06) }
+        return Color.clear
+    }
+
+    var body: some View {
+        fill.animation(.easeOut(duration: 0.12), value: isHovering)
     }
 }
 
