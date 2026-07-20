@@ -33,13 +33,22 @@ public struct ChronicleConfig: Codable, Equatable {
     /// without an entry fall back to a stable auto-color derived from their key.
     public var taskColors: [String: String]
 
+    /// Ordered title-rename chains. Each chain is a list of raw event titles
+    /// where the **last** entry is the canonical (newest) title and every
+    /// earlier entry is an alias that merges into it. A chain models a task
+    /// renamed one or more times over time, e.g.
+    /// `["VP of Engineering", "em - Code Reviews", "em - Engineering Lead"]`.
+    /// Display-only: applied at read time, so changing it never re-extracts.
+    public var aliasChains: [[String]]
+
     public init(calendarAllowlist: [String] = [],
                 subtaskSeparator: String = " - ",
                 subtractiveCalendars: [String] = [],
                 wholeCalendarSegments: [String] = [],
                 windowPastDays: Int = 60,
                 windowFutureDays: Int = 14,
-                taskColors: [String: String] = [:]) {
+                taskColors: [String: String] = [:],
+                aliasChains: [[String]] = []) {
         self.calendarAllowlist = calendarAllowlist
         self.subtaskSeparator = subtaskSeparator
         self.subtractiveCalendars = subtractiveCalendars
@@ -47,6 +56,7 @@ public struct ChronicleConfig: Codable, Equatable {
         self.windowPastDays = windowPastDays
         self.windowFutureDays = windowFutureDays
         self.taskColors = taskColors
+        self.aliasChains = aliasChains
     }
 
     public static let `default` = ChronicleConfig()
@@ -54,6 +64,7 @@ public struct ChronicleConfig: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case calendarAllowlist, subtaskSeparator, subtractiveCalendars
         case wholeCalendarSegments, windowPastDays, windowFutureDays, taskColors
+        case aliasChains
     }
 
     /// Tolerant decoding so configs written by older versions (which lack the
@@ -68,6 +79,7 @@ public struct ChronicleConfig: Codable, Equatable {
         windowPastDays = try c.decodeIfPresent(Int.self, forKey: .windowPastDays) ?? d.windowPastDays
         windowFutureDays = try c.decodeIfPresent(Int.self, forKey: .windowFutureDays) ?? d.windowFutureDays
         taskColors = try c.decodeIfPresent([String: String].self, forKey: .taskColors) ?? d.taskColors
+        aliasChains = try c.decodeIfPresent([[String]].self, forKey: .aliasChains) ?? d.aliasChains
     }
 
     /// Loads config from disk. If the file is missing, writes and returns the

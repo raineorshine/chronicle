@@ -37,6 +37,7 @@ public final class Database {
             try createSchema()
             try migrate()
         }
+        try createAliasView()
     }
 
     deinit {
@@ -90,6 +91,74 @@ public final class Database {
             if columnText(stmt, 1) == column { return true }
         }
         return false
+    }
+
+    // MARK: - Aliases (read-time canonicalization)
+
+    /// Creates the connection-local `alias_map` table and the `canonical_time`
+    /// view read by every query. `canonical_time` rewrites each row's
+    /// task/subtask key+label to its alias target (when one matches), so renamed
+    /// tasks roll up as one activity. Temp objects live in the per-connection
+    /// temp database, so this works even for read-only connections and never
+    /// touches the on-disk schema. `alias_map` starts empty (a pass-through);
+    /// `setAliases` repopulates it and the view reflects the change live.
+    private func createAliasView() throws {
+        try exec("""
+        CREATE TEMP TABLE IF NOT EXISTS alias_map (
+            from_task_key TEXT NOT NULL,
+            from_subtask_key TEXT,
+            to_task_key TEXT NOT NULL,
+            to_task_label TEXT NOT NULL,
+            to_subtask_key TEXT,
+            to_subtask_label TEXT
+        );
+        """)
+        try exec("""
+        CREATE TEMP VIEW IF NOT EXISTS canonical_time AS
+        SELECT
+            d.date,
+            d.calendar_key,
+            d.calendar_label,
+            d.calendar_color,
+            COALESCE(a.to_task_key, d.task_key) AS task_key,
+            COALESCE(a.to_task_label, d.task_label) AS task_label,
+            CASE WHEN a.from_task_key IS NOT NULL
+                 THEN a.to_subtask_key ELSE d.subtask_key END AS subtask_key,
+            CASE WHEN a.from_task_key IS NOT NULL
+                 THEN a.to_subtask_label ELSE d.subtask_label END AS subtask_label,
+            d.duration_seconds,
+            d.occurrence_count
+        FROM daily_time d
+        LEFT JOIN alias_map a
+            ON d.task_key = a.from_task_key
+            AND d.subtask_key IS a.from_subtask_key;
+        """)
+    }
+
+    /// Replaces the active alias set. Rows in `daily_time` whose
+    /// `(task_key, subtask_key)` matches an alias's `from` are read through
+    /// `canonical_time` as the alias's `to` identity.
+    public func setAliases(_ aliases: [ResolvedAlias]) throws {
+        try exec("DELETE FROM alias_map;")
+        guard !aliases.isEmpty else { return }
+        let sql = """
+        INSERT INTO alias_map
+            (from_task_key, from_subtask_key, to_task_key, to_task_label,
+             to_subtask_key, to_subtask_label)
+        VALUES (?, ?, ?, ?, ?, ?);
+        """
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        for a in aliases {
+            sqlite3_reset(stmt)
+            bindText(stmt, 1, a.fromTaskKey)
+            bindNullableText(stmt, 2, a.fromSubtaskKey)
+            bindText(stmt, 3, a.toTaskKey)
+            bindText(stmt, 4, a.toTaskLabel)
+            bindNullableText(stmt, 5, a.toSubtaskKey)
+            bindNullableText(stmt, 6, a.toSubtaskLabel)
+            guard sqlite3_step(stmt) == SQLITE_DONE else { throw stepError() }
+        }
     }
 
     // MARK: - Write

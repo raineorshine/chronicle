@@ -21,4 +21,20 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(decoded.wholeCalendarSegments, [])
         XCTAssertEqual(decoded.calendarAllowlist, ["Work"])
     }
+
+    func testRoundTripPreservesAliasChains() throws {
+        let chains = [["VP of Engineering", "em - Code Reviews", "em - Engineering Lead"]]
+        let config = ChronicleConfig(aliasChains: chains)
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(ChronicleConfig.self, from: data)
+        XCTAssertEqual(decoded.aliasChains, chains)
+        XCTAssertEqual(decoded, config)
+    }
+
+    func testTolerantDecodeDefaultsMissingAliasChains() throws {
+        let json = #"{"calendarAllowlist":["Work"],"subtaskSeparator":" - "}"#
+        let decoded = try JSONDecoder().decode(ChronicleConfig.self,
+                                               from: Data(json.utf8))
+        XCTAssertEqual(decoded.aliasChains, [])
+    }
 }
