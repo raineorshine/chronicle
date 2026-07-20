@@ -35,13 +35,22 @@ public struct ChronicleConfig: Codable, Equatable {
     /// without an entry fall back to a stable auto-color derived from their key.
     public var taskColors: [String: String]
 
+    /// Weekday on which the sidebar/legend tallies switch from the previous
+    /// (just-completed) week to the current, in-progress week. Uses Foundation's
+    /// weekday numbering (1 = Sunday … 7 = Saturday). Before this weekday the
+    /// tallies cover the whole previous week (Mon–Sun); on or after it they cover
+    /// the current week (Mon–today). Defaults to `6` (Friday). Display-only:
+    /// changing it never triggers re-extraction.
+    public var weeklyMetricsCutoff: Int
+
     public init(calendarAllowlist: [String] = [],
                 subtaskSeparators: [String] = [" - ", " | "],
                 subtractiveCalendars: [String] = [],
                 wholeCalendarSegments: [String] = [],
                 windowPastDays: Int = 60,
                 windowFutureDays: Int = 14,
-                taskColors: [String: String] = [:]) {
+                taskColors: [String: String] = [:],
+                weeklyMetricsCutoff: Int = 6) {
         self.calendarAllowlist = calendarAllowlist
         self.subtaskSeparators = subtaskSeparators
         self.subtractiveCalendars = subtractiveCalendars
@@ -49,6 +58,7 @@ public struct ChronicleConfig: Codable, Equatable {
         self.windowPastDays = windowPastDays
         self.windowFutureDays = windowFutureDays
         self.taskColors = taskColors
+        self.weeklyMetricsCutoff = weeklyMetricsCutoff
     }
 
     public static let `default` = ChronicleConfig()
@@ -56,6 +66,7 @@ public struct ChronicleConfig: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case calendarAllowlist, subtaskSeparators, subtractiveCalendars
         case wholeCalendarSegments, windowPastDays, windowFutureDays, taskColors
+        case weeklyMetricsCutoff
         // Legacy single-separator key, decoded for migration only.
         case subtaskSeparator
     }
@@ -79,6 +90,7 @@ public struct ChronicleConfig: Codable, Equatable {
         windowPastDays = try c.decodeIfPresent(Int.self, forKey: .windowPastDays) ?? d.windowPastDays
         windowFutureDays = try c.decodeIfPresent(Int.self, forKey: .windowFutureDays) ?? d.windowFutureDays
         taskColors = try c.decodeIfPresent([String: String].self, forKey: .taskColors) ?? d.taskColors
+        weeklyMetricsCutoff = try c.decodeIfPresent(Int.self, forKey: .weeklyMetricsCutoff) ?? d.weeklyMetricsCutoff
     }
 
     /// Custom encoder that omits the legacy `subtaskSeparator` key, writing only
@@ -92,6 +104,7 @@ public struct ChronicleConfig: Codable, Equatable {
         try c.encode(windowPastDays, forKey: .windowPastDays)
         try c.encode(windowFutureDays, forKey: .windowFutureDays)
         try c.encode(taskColors, forKey: .taskColors)
+        try c.encode(weeklyMetricsCutoff, forKey: .weeklyMetricsCutoff)
     }
 
     /// Loads config from disk. If the file is missing, writes and returns the

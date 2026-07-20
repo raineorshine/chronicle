@@ -102,7 +102,8 @@ Your choices are stored in a config file (you normally don't edit this by hand):
   "subtaskSeparators": [" - ", " | "],
   "subtractiveCalendars": ["Instagram"],
   "windowPastDays": 60,
-  "windowFutureDays": 14
+  "windowFutureDays": 14,
+  "weeklyMetricsCutoff": 6
 }
 ```
 
@@ -117,6 +118,11 @@ Your choices are stored in a config file (you normally don't edit this by hand):
   subtractive calendar is always extracted, even if not in the allowlist.
 - **windowPastDays / windowFutureDays** — the rolling window that is rebuilt on
   every run (previous 60 days, today, next 14 days by default).
+- **weeklyMetricsCutoff** — the weekday (1 = Sunday … 7 = Saturday) when the
+  sidebar and legend hour tallies roll over to the current week. Before it, the
+  tallies show the whole previous week (Mon–Sun); on or after it, they show the
+  current week (Mon–today). Defaults to `6` (Friday), so Mon–Thu show last week
+  and Fri–Sun show this week.
 
 ## Subtractive calendars
 
