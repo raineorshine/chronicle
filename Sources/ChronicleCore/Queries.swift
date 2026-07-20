@@ -81,6 +81,36 @@ public struct CalendarDailyPoint: Equatable, Identifiable {
     }
 }
 
+/// One day of a single (task, calendar) pair, carrying both the task identity
+/// and its source calendar (with color). Feeds the top-level chart that shows
+/// task-mode calendars' tasks individually and folds whole-calendar-mode
+/// calendars into a single per-calendar segment.
+public struct TaskCalendarDailyPoint: Equatable {
+    public let date: String
+    public let taskKey: String
+    public let taskLabel: String
+    public let calendarKey: String
+    public let calendarLabel: String
+    public let calendarColorHex: String?
+    public let hours: Double
+
+    public init(date: String,
+                taskKey: String,
+                taskLabel: String,
+                calendarKey: String,
+                calendarLabel: String,
+                calendarColorHex: String?,
+                hours: Double) {
+        self.date = date
+        self.taskKey = taskKey
+        self.taskLabel = taskLabel
+        self.calendarKey = calendarKey
+        self.calendarLabel = calendarLabel
+        self.calendarColorHex = calendarColorHex
+        self.hours = hours
+    }
+}
+
 /// Totals for a selected range.
 public struct RangeTotals: Equatable {
     public let totalHours: Double
@@ -304,6 +334,46 @@ extension Database {
                                             segmentKey: key,
                                             segmentLabel: label,
                                             hours: Double(seconds) / 3600.0))
+        }
+        return points
+    }
+
+    /// Per-day hours for every (task, calendar) pair over `[from, to]`
+    /// (inclusive), across all calendars. Labels use the plain `MAX(label)`;
+    /// the color is any (`MAX`) color seen for the calendar. Drives the
+    /// top-level chart's per-calendar segment-mode segmentation, which
+    /// needs each task's source calendar (unlike `segmentDailySeries`).
+    public func activityCalendarDailySeries(from: String,
+                                            to: String) throws -> [TaskCalendarDailyPoint] {
+        let sql = """
+        SELECT date, task_key, MAX(task_label), calendar_key,
+               MAX(calendar_label), MAX(calendar_color), SUM(duration_seconds)
+        FROM daily_time
+        WHERE date >= ? AND date <= ?
+        GROUP BY date, task_key, calendar_key
+        ORDER BY date;
+        """
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, from)
+        bindText(stmt, 2, to)
+
+        var points: [TaskCalendarDailyPoint] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let date = columnText(stmt, 0) ?? ""
+            let taskKey = columnText(stmt, 1) ?? ""
+            let taskLabel = columnText(stmt, 2) ?? taskKey
+            let calKey = columnText(stmt, 3) ?? ""
+            let calLabel = columnText(stmt, 4) ?? calKey
+            let color = columnText(stmt, 5)
+            let seconds = sqlite3_column_int64(stmt, 6)
+            points.append(TaskCalendarDailyPoint(date: date,
+                                                 taskKey: taskKey,
+                                                 taskLabel: taskLabel,
+                                                 calendarKey: calKey,
+                                                 calendarLabel: calLabel,
+                                                 calendarColorHex: color,
+                                                 hours: Double(seconds) / 3600.0))
         }
         return points
     }

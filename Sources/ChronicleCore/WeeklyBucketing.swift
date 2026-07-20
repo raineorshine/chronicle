@@ -26,14 +26,24 @@ public struct WeeklySegment: Equatable, Identifiable {
     public let totalHours: Double
     /// True for the synthetic "Other" bucket that folds the long tail.
     public let isOther: Bool
+    /// True for a per-calendar segment folding all of this calendar's tasks
+    /// (calendars configured to segment as a whole rather than by task).
+    public let isCalendarBucket: Bool
+    /// The calendar's own `#RRGGBB` color, for calendar-bucket segments.
+    public let colorHex: String?
 
     public var id: String { key }
 
-    public init(key: String, label: String, totalHours: Double, isOther: Bool = false) {
+    public init(key: String, label: String, totalHours: Double,
+                isOther: Bool = false,
+                isCalendarBucket: Bool = false,
+                colorHex: String? = nil) {
         self.key = key
         self.label = label
         self.totalHours = totalHours
         self.isOther = isOther
+        self.isCalendarBucket = isCalendarBucket
+        self.colorHex = colorHex
     }
 }
 
@@ -60,6 +70,15 @@ public struct WeeklyStacks: Equatable {
 /// `firstWeekday`. Kept free of SwiftUI so it is unit-testable.
 public enum WeeklyBucketing {
     public static let otherKey = "\u{1F}other"
+
+    /// Prefix marking a segment key as a whole-calendar segment (see
+    /// `bucketByCalendarSegmentMode`). The remainder is the `calendar_key`.
+    public static let calendarKeyPrefix = "\u{1F}cal:"
+
+    /// True when `key` identifies a whole-calendar segment.
+    public static func isCalendarBucketKey(_ key: String) -> Bool {
+        key.hasPrefix(calendarKeyPrefix)
+    }
 
     public static func bucket(_ points: [SegmentDailyPoint],
                               calendar: Calendar,
@@ -124,6 +143,84 @@ public enum WeeklyBucketing {
             .sorted { $0.id < $1.id }
 
         return WeeklyStacks(points: points,
+                            segments: segments,
+                            weekStarts: weekStartSet.sorted())
+    }
+
+    /// Top-level segmentation driven by per-calendar configuration. Calendars
+    /// whose `calendar_key` is in `wholeCalendarKeys` fold all of their tasks
+    /// into a single whole-calendar segment; every other calendar's events
+    /// surface as individual task segments, merged by `task_key` across all
+    /// task-mode calendars. There is no top-N cap and no "Other" bucket.
+    /// Segments are ordered for week-to-week visual continuity: task segments
+    /// first, alphabetically by `task_key`, then whole-calendar segments
+    /// alphabetically by `calendar_key`. Week boundaries follow `calendar`'s
+    /// `firstWeekday`. Kept free of SwiftUI so it is unit-testable.
+    public static func bucketByCalendarSegmentMode(_ points: [TaskCalendarDailyPoint],
+                                                   calendar: Calendar,
+                                                   wholeCalendarKeys: Set<String>) -> WeeklyStacks {
+        guard !points.isEmpty else { return .empty }
+        let formatter = DateAggregator.dateFormatter(calendar: calendar)
+
+        struct Cell: Hashable { let week: String; let key: String }
+        var cellHours: [Cell: Double] = [:]
+        var totalByKey: [String: Double] = [:]
+        var weekStartSet: Set<String> = []
+
+        // Per-segment display metadata, resolved to the most recent date so a
+        // task's newest label / a calendar's newest color wins.
+        struct Meta { var label: String; var date: String; var color: String? }
+        var taskMeta: [String: Meta] = [:]       // key = task_key
+        var calendarMeta: [String: Meta] = [:]   // key = calendarKeyPrefix + calendar_key
+
+        for p in points {
+            guard p.hours > 0,
+                  let date = formatter.date(from: p.date),
+                  let interval = calendar.dateInterval(of: .weekOfYear, for: date) else { continue }
+            let week = formatter.string(from: interval.start)
+            weekStartSet.insert(week)
+
+            let isWhole = wholeCalendarKeys.contains(p.calendarKey)
+            let key = isWhole ? calendarKeyPrefix + p.calendarKey : p.taskKey
+
+            if isWhole {
+                if calendarMeta[key] == nil || p.date >= calendarMeta[key]!.date {
+                    calendarMeta[key] = Meta(label: p.calendarLabel, date: p.date,
+                                             color: p.calendarColorHex)
+                }
+            } else {
+                if taskMeta[key] == nil || p.date >= taskMeta[key]!.date {
+                    taskMeta[key] = Meta(label: p.taskLabel, date: p.date, color: nil)
+                }
+            }
+            totalByKey[key, default: 0] += p.hours
+            cellHours[Cell(week: week, key: key), default: 0] += p.hours
+        }
+
+        // Task segments first (alpha by task key), then whole-calendar segments
+        // (alpha by calendar key) — stable ordering independent of hours.
+        let taskKeys = taskMeta.keys.sorted()
+        let calendarKeys = calendarMeta.keys.sorted()
+
+        var segments: [WeeklySegment] = taskKeys.map { key in
+            WeeklySegment(key: key, label: taskMeta[key]?.label ?? key,
+                          totalHours: totalByKey[key] ?? 0)
+        }
+        segments += calendarKeys.map { key in
+            WeeklySegment(key: key, label: calendarMeta[key]?.label ?? key,
+                          totalHours: totalByKey[key] ?? 0,
+                          isCalendarBucket: true, colorHex: calendarMeta[key]?.color)
+        }
+
+        let labelForKey: (String) -> String = { key in
+            taskMeta[key]?.label ?? calendarMeta[key]?.label ?? key
+        }
+        let stackPoints = cellHours
+            .map { WeeklyStackPoint(weekStart: $0.key.week, segmentKey: $0.key.key,
+                                    segmentLabel: labelForKey($0.key.key), hours: $0.value) }
+            .sorted { $0.id < $1.id }
+
+        return WeeklyStacks(points: stackPoints,
                             segments: segments,
                             weekStarts: weekStartSet.sorted())
     }

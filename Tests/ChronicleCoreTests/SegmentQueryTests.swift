@@ -77,6 +77,35 @@ final class SegmentQueryTests: XCTestCase {
         XCTAssertEqual(points.first?.segmentKey, "em")
     }
 
+    func testActivityCalendarDailySeriesGroupsByTaskAndCalendar() throws {
+        let db = try makeDB()
+        try db.replaceWindow(rows: [
+            DailyRow(date: "2026-07-06", calendarKey: "work", calendarLabel: "Work",
+                     calendarColor: "#111111", taskKey: "em", taskLabel: "⚙️ em",
+                     subtaskKey: nil, subtaskLabel: nil, durationSeconds: 3600, occurrenceCount: 1),
+            // Same task+calendar, different subtask -> merged into one (task,calendar) row.
+            DailyRow(date: "2026-07-06", calendarKey: "work", calendarLabel: "Work",
+                     calendarColor: "#111111", taskKey: "em", taskLabel: "⚙️ em",
+                     subtaskKey: "accounting", subtaskLabel: "accounting",
+                     durationSeconds: 1800, occurrenceCount: 1),
+            // Same task, different calendar -> separate (task,calendar) row.
+            DailyRow(date: "2026-07-06", calendarKey: "personal", calendarLabel: "Personal",
+                     calendarColor: "#222222", taskKey: "em", taskLabel: "⚙️ em",
+                     subtaskKey: nil, subtaskLabel: nil, durationSeconds: 1800, occurrenceCount: 1),
+        ], firstDate: "2026-07-01", lastDate: "2026-07-31")
+
+        let points = try db.activityCalendarDailySeries(from: "2026-07-01", to: "2026-07-31")
+
+        let work = points.first { $0.calendarKey == "work" }
+        let personal = points.first { $0.calendarKey == "personal" }
+        XCTAssertEqual(points.count, 2) // (em, work) and (em, personal)
+        XCTAssertEqual(work?.hours ?? 0, 1.5, accuracy: 0.0001) // 1h + 0.5h subtasks merged
+        XCTAssertEqual(work?.calendarColorHex, "#111111")
+        XCTAssertEqual(work?.taskLabel, "⚙️ em")
+        XCTAssertEqual(personal?.hours ?? 0, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(personal?.calendarColorHex, "#222222")
+    }
+
     func testTaskSummariesConsolidateEmojiVariantsUsingMostRecentLabel() throws {
         let db = try makeDB()
         // Same activity ("walk") logged with different emoji on different dates.
