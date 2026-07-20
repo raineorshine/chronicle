@@ -106,6 +106,8 @@ private struct TaskRow: View {
             HoursShareBar(fraction: shareFraction,
                           color: store.taskColor(forKey: task.key))
         }
+        .rowHighlight(active: store.isHighlighted(task.key)
+                      && store.selectedNodeID != nodeID)
         .onHover { hovering in
             if hovering {
                 store.setHighlight(task.key)
@@ -113,8 +115,7 @@ private struct TaskRow: View {
                 store.setHighlight(nil)
             }
         }
-        .listRowBackground(RowHoverBackground(isSelected: store.selectedNodeID == nodeID,
-                                              isHighlighted: store.isHighlighted(task.key)))
+        .listRowBackground(RowHoverBackground(isSelected: store.selectedNodeID == nodeID))
     }
 
     /// This task's share of the week's total recorded hours (0...1).
@@ -282,33 +283,52 @@ private struct SelectableRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .rowHighlight(active: showsTint && !isSelected)
         .onHover { hovering in
             isHovering = hovering
             onHoverChanged?(hovering)
         }
-        .listRowBackground(RowHoverBackground(isSelected: isSelected,
-                                              isHighlighted: showsTint))
+        .listRowBackground(RowHoverBackground(isSelected: isSelected))
     }
 }
 
-/// Shared row background that folds hover into selection styling: a selected row
-/// keeps its accent tint, an un-selected highlighted row shows a subtle
-/// highlight, and everything else is clear. Highlight is driven by the store's
-/// single shared hover key (or, for non-cross-lit rows, the row's own local
-/// hover). The tint is applied instantly (no fade) so sweeping the mouse across
-/// rows can't leave a trail of fading highlights on rows you've already left.
+/// Inner highlight background for a sidebar row. Applied as part of the row's own
+/// content (not `listRowBackground`), so it repaints in lockstep with the row
+/// body. `listRowBackground` on an AppKit-backed `List` repaints lazily on cell
+/// reuse, which left a just-exited row's tint on screen for up to ~1s while the
+/// next row lit up - looking like two highlighted rows at once. Drawing the tint
+/// here updates deterministically, so exactly one row is ever tinted.
+private struct RowHighlight: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(active ? Color.primary.opacity(0.08) : Color.clear)
+            )
+            .padding(.horizontal, -6)
+            .padding(.vertical, -3)
+    }
+}
+
+private extension View {
+    func rowHighlight(active: Bool) -> some View {
+        modifier(RowHighlight(active: active))
+    }
+}
+
+/// Full-bleed list-row background for the selection accent only. Hover/highlight
+/// tint is drawn by `RowHighlight` inside the row content instead, because
+/// `listRowBackground` repaints lazily on cell reuse and would otherwise leave a
+/// stale tint on a just-exited row.
 private struct RowHoverBackground: View {
     let isSelected: Bool
-    var isHighlighted: Bool = false
-
-    private var fill: Color {
-        if isSelected { return Color.accentColor.opacity(0.18) }
-        if isHighlighted { return Color.primary.opacity(0.08) }
-        return Color.clear
-    }
 
     var body: some View {
-        fill
+        (isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
     }
 }
 
