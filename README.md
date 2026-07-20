@@ -275,7 +275,11 @@ data:
 ```bash
 # build once, then run the binary with --demo
 xcodebuild build -scheme chronicle-extract -destination 'platform=macOS'
-"$(find ~/Library/Developer/Xcode/DerivedData/Chronicle-*/Build/Products/Debug -name chronicle-extract | head -1)" --demo
+# ask xcodebuild where it put the binary (correct even with many worktrees /
+# DerivedData dirs — don't glob DerivedData and take the first match, it's usually stale)
+PRODUCTS_DIR=$(xcodebuild -showBuildSettings -scheme chronicle-extract -destination 'platform=macOS' 2>/dev/null \
+  | awk -F' = ' '/ BUILT_PRODUCTS_DIR = /{print $2; exit}')
+"$PRODUCTS_DIR/chronicle-extract" --demo
 ```
 
 This writes ~two weeks of plausible events (including a midnight-crossing one)
