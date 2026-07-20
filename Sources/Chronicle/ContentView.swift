@@ -522,13 +522,21 @@ extension Color {
     }
 }
 
+/// A transparent AppKit view that shows its `toolTip` on hover but never
+/// intercepts mouse events. Returning `nil` from `hitTest(_:)` lets clicks pass
+/// through to the control beneath, while the window's tooltip-rect tracking
+/// (which does not rely on `hitTest`) still displays the tooltip.
+private final class PassthroughToolTipView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// Attaches an AppKit tooltip that displays on hover. Unlike SwiftUI's
 /// `.help(_:)`, `NSView.toolTip` renders reliably inside popovers.
 private struct ToolTipView: NSViewRepresentable {
     let text: String
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+        let view = PassthroughToolTipView()
         view.toolTip = text
         return view
     }
