@@ -435,7 +435,7 @@ private struct CalendarPickerRow: View {
                     .foregroundStyle(isSubtractive ? Color.accentColor : Color.secondary)
             }
             .buttonStyle(.borderless)
-            .help(isSubtractive
+            .toolTip(isSubtractive
                   ? "Subtractive: this calendar's time is removed from overlapping "
                     + "events in other calendars. Click to turn off."
                   : "Mark subtractive: remove this calendar's time from overlapping "
@@ -467,6 +467,29 @@ extension Color {
         let g = Int((srgb.greenComponent * 255).rounded())
         let b = Int((srgb.blueComponent * 255).rounded())
         return String(format: "#%02X%02X%02X", r, g, b)
+    }
+}
+
+/// Attaches an AppKit tooltip that displays on hover. Unlike SwiftUI's
+/// `.help(_:)`, `NSView.toolTip` renders reliably inside popovers.
+private struct ToolTipView: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.toolTip = text
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        nsView.toolTip = text
+    }
+}
+
+extension View {
+    /// A hover tooltip that works inside popovers, where `.help(_:)` does not.
+    func toolTip(_ text: String) -> some View {
+        overlay(ToolTipView(text: text))
     }
 }
 
