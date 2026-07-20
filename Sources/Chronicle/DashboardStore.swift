@@ -284,7 +284,7 @@ final class DashboardStore: ObservableObject {
     /// (or every segment, when no chart segment is highlighted) stays fully opaque;
     /// others dim.
     func chartOpacity(forSegment key: String) -> Double {
-        (!isHighlightActiveInChart || highlightedSegmentKey == key) ? 1.0 : 0.22
+        (!isHighlightActiveInChart || highlightedSegmentKey == key) ? 1.0 : 0.55
     }
 
     /// Whether `key` is the currently highlighted segment (nil-safe).
