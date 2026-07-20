@@ -64,6 +64,11 @@ final class DashboardStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var isRefreshing = false
 
+    /// Transient, non-persisted key of the segment currently emphasized by hover.
+    /// A single shared value drives cross-highlighting across the chart, the
+    /// legend, and the left sidebar (all keyed by the same normalized-title key).
+    @Published var highlightedSegmentKey: String? = nil
+
     let allowedWeekWindows = [4, 8, 12]
 
     // MARK: - Calendar picker state
@@ -257,6 +262,35 @@ final class DashboardStore: ObservableObject {
     var styleRange: [Color] { segmentStyles.map(\.color) }
 
     func color(forSegment key: String) -> Color { styleIndex[key]?.color ?? .gray }
+
+    // MARK: - Hover highlight
+
+    /// Set (or clear) the shared hover highlight. Only publishes on an actual
+    /// change so continuous hover over one segment doesn't churn the render tree.
+    func setHighlight(_ key: String?) {
+        guard highlightedSegmentKey != key else { return }
+        highlightedSegmentKey = key
+    }
+
+    /// True when the current highlight corresponds to a segment actually drawn in
+    /// the chart. Gates chart dimming so hovering a row that isn't a current chart
+    /// segment (e.g. "Other", a whole-calendar member, an uncharted task) leaves
+    /// the chart fully opaque instead of blanking it.
+    var isHighlightActiveInChart: Bool {
+        highlightedSegmentKey.map { styleIndex[$0] != nil } ?? false
+    }
+
+    /// Opacity for a chart segment given the shared highlight: the matched segment
+    /// (or every segment, when no chart segment is highlighted) stays fully opaque;
+    /// others dim.
+    func chartOpacity(forSegment key: String) -> Double {
+        (!isHighlightActiveInChart || highlightedSegmentKey == key) ? 1.0 : 0.55
+    }
+
+    /// Whether `key` is the currently highlighted segment (nil-safe).
+    func isHighlighted(_ key: String?) -> Bool {
+        key != nil && key == highlightedSegmentKey
+    }
 
     /// A resolved segment under the cursor, for the granular hover tooltip.
     struct HoveredSegment: Equatable {

@@ -50,8 +50,6 @@ private struct TaskRow: View {
     @ObservedObject var store: DashboardStore
     let task: TaskSummary
 
-    @State private var isHovering = false
-
     private var nodeID: String { "task:\(task.key)" }
 
     var body: some View {
@@ -66,7 +64,15 @@ private struct TaskRow: View {
                                       isSelected: store.selectedNodeID == subID,
                                       systemImage: "circle.fill",
                                       indent: 1,
-                                      detail: Self.hours(sub.hours)) {
+                                      detail: Self.hours(sub.hours),
+                                      isHighlighted: store.isHighlighted(sub.key),
+                                      onHoverChanged: { hovering in
+                                          if hovering {
+                                              store.setHighlight(sub.key)
+                                          } else if store.highlightedSegmentKey == sub.key {
+                                              store.setHighlight(nil)
+                                          }
+                                      }) {
                             store.select(HierarchySelection(taskKey: task.key,
                                                             subtaskKey: sub.key),
                                          nodeID: subID)
@@ -100,9 +106,16 @@ private struct TaskRow: View {
             HoursShareBar(fraction: shareFraction,
                           color: store.taskColor(forKey: task.key))
         }
-        .onHover { isHovering = $0 }
-        .listRowBackground(RowHoverBackground(isSelected: store.selectedNodeID == nodeID,
-                                              isHovering: isHovering))
+        .rowHighlight(active: store.isHighlighted(task.key)
+                      && store.selectedNodeID != nodeID)
+        .onHover { hovering in
+            if hovering {
+                store.setHighlight(task.key)
+            } else if store.highlightedSegmentKey == task.key {
+                store.setHighlight(nil)
+            }
+        }
+        .listRowBackground(RowHoverBackground(isSelected: store.selectedNodeID == nodeID))
     }
 
     /// This task's share of the week's total recorded hours (0...1).
@@ -237,9 +250,18 @@ private struct SelectableRow: View {
     let systemImage: String
     var indent: Int = 0
     var detail: String? = nil
+    var isHighlighted: Bool = false
+    /// When provided, the row participates in the shared cross-surface highlight
+    /// (keyed) and its tint is driven solely by `isHighlighted`. When nil, the row
+    /// is non-cross-lit (e.g. "All Tasks") and falls back to its own local hover.
+    var onHoverChanged: ((Bool) -> Void)? = nil
     let action: () -> Void
 
     @State private var isHovering = false
+
+    private var showsTint: Bool {
+        onHoverChanged == nil ? isHovering : isHighlighted
+    }
 
     var body: some View {
         Button(action: action) {
@@ -261,26 +283,52 @@ private struct SelectableRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .listRowBackground(RowHoverBackground(isSelected: isSelected, isHovering: isHovering))
+        .rowHighlight(active: showsTint && !isSelected)
+        .onHover { hovering in
+            isHovering = hovering
+            onHoverChanged?(hovering)
+        }
+        .listRowBackground(RowHoverBackground(isSelected: isSelected))
     }
 }
 
-/// Shared row background that folds hover into selection styling: a selected row
-/// keeps its accent tint, an un-selected hovered row shows a subtle highlight,
-/// and everything else is clear. The change is animated for a gentle fade.
+/// Inner highlight background for a sidebar row. Applied as part of the row's own
+/// content (not `listRowBackground`), so it repaints in lockstep with the row
+/// body. `listRowBackground` on an AppKit-backed `List` repaints lazily on cell
+/// reuse, which left a just-exited row's tint on screen for up to ~1s while the
+/// next row lit up - looking like two highlighted rows at once. Drawing the tint
+/// here updates deterministically, so exactly one row is ever tinted.
+private struct RowHighlight: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(active ? Color.primary.opacity(0.08) : Color.clear)
+            )
+            .padding(.horizontal, -6)
+            .padding(.vertical, -3)
+    }
+}
+
+private extension View {
+    func rowHighlight(active: Bool) -> some View {
+        modifier(RowHighlight(active: active))
+    }
+}
+
+/// Full-bleed list-row background for the selection accent only. Hover/highlight
+/// tint is drawn by `RowHighlight` inside the row content instead, because
+/// `listRowBackground` repaints lazily on cell reuse and would otherwise leave a
+/// stale tint on a just-exited row.
 private struct RowHoverBackground: View {
     let isSelected: Bool
-    let isHovering: Bool
-
-    private var fill: Color {
-        if isSelected { return Color.accentColor.opacity(0.18) }
-        if isHovering { return Color.primary.opacity(0.06) }
-        return Color.clear
-    }
 
     var body: some View {
-        fill.animation(.easeOut(duration: 0.12), value: isHovering)
+        (isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
     }
 }
 
@@ -819,14 +867,14 @@ private struct WeeklyChartCard: View {
                 )
                 .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
                 .interpolationMethod(.linear)
-                .opacity(1.0)
+                .opacity(store.chartOpacity(forSegment: point.segmentKey))
             } else {
                 BarMark(
                     x: .value("Week", store.weekDate(point.weekStart)),
                     y: .value("Hours", point.hours)
                 )
                 .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
-                .opacity(1.0)
+                .opacity(store.chartOpacity(forSegment: point.segmentKey))
             }
         }
         .chartForegroundStyleScale(domain: store.styleDomain, range: store.styleRange)
@@ -843,6 +891,7 @@ private struct WeeklyChartCard: View {
         .chartYAxisLabel("Hours")
         .chartLegend(.hidden)
         .frame(height: 300)
+        .animation(.easeInOut(duration: 0.15), value: store.highlightedSegmentKey)
         .chartOverlay { proxy in
             GeometryReader { geo in
                 ZStack(alignment: .topLeading) {
@@ -860,11 +909,14 @@ private struct WeeklyChartCard: View {
                                    let seg = store.segment(inWeek: week, atHours: hours) {
                                     hovered = seg
                                     hoverPoint = location
+                                    store.setHighlight(seg.key)
                                 } else {
                                     hovered = nil
+                                    store.setHighlight(nil)
                                 }
                             case .ended:
                                 hovered = nil
+                                store.setHighlight(nil)
                             }
                         }
                     if let seg = hovered {
@@ -958,6 +1010,20 @@ private struct SegmentLegend: View {
                     .disabled(!drillable)
                     .help(drillable ? "Break \(style.displayLabel) down by subtask"
                           : isCalendarBucket ? "\(style.displayLabel) (whole calendar)" : "")
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(store.isHighlighted(style.key) ? Color.primary.opacity(0.08) : Color.clear)
+                )
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    if hovering {
+                        store.setHighlight(style.key)
+                    } else if store.highlightedSegmentKey == style.key {
+                        store.setHighlight(nil)
+                    }
                 }
             }
         }
