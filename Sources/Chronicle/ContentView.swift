@@ -292,7 +292,6 @@ private struct DashboardDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            WindowControls(store: store)
             if let message = store.errorMessage {
                 errorBanner(message)
             }
@@ -331,7 +330,7 @@ private struct DashboardDetail: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: showsBackButton ? 8 : 0) {
                     Button {
@@ -351,7 +350,7 @@ private struct DashboardDetail: View {
                                        : "Subtask breakdown by week")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
-            Spacer()
+            WindowControls(store: store)
         }
     }
 
@@ -716,9 +715,9 @@ private struct WindowControls: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("\(store.dateBounds.from) → \(store.dateBounds.to)")
-                .font(.caption).foregroundStyle(.secondary)
             Spacer()
+            Text(store.dateBoundsShort)
+                .font(.caption).foregroundStyle(.secondary)
 
             WeeksPopUpButton(
                 options: store.allowedWeekWindows,
