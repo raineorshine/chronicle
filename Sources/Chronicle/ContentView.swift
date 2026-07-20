@@ -836,7 +836,6 @@ private struct WeeklyChartCard: View {
                 if let date = value.as(Date.self) {
                     AxisValueLabel(anchor: axisLabelAnchor(for: date)) {
                         Text(store.weekLabelShort(date: date))
-                            + Text(store.isCurrentWeek(date) ? " •" : "")
                     }
                 }
             }
