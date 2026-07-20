@@ -315,6 +315,12 @@ private struct DashboardDetail: View {
                     .disabled(!showsBackButton)
                     .accessibilityHidden(!showsBackButton)
                     Text(selectionTitle).font(.title2).bold()
+                        .contextMenu {
+                            Button("Copy task name") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(selectionTitle, forType: .string)
+                            }
+                        }
                 }
                 Text(store.isTaskLevel ? "Hours per activity by week"
                                        : "Subtask breakdown by week")
@@ -906,6 +912,12 @@ private struct SegmentLegend: View {
                     .disabled(!drillable)
                     .help(drillable ? "Break \(style.displayLabel) down by subtask"
                           : isCalendarBucket ? "\(style.displayLabel) (whole calendar)" : "")
+                }
+                .contextMenu {
+                    Button("Copy task name") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(style.displayLabel, forType: .string)
+                    }
                 }
             }
         }
