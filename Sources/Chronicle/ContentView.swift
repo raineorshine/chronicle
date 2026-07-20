@@ -554,18 +554,66 @@ private struct WindowControls: View {
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
 
-            Picker("Weeks", selection: Binding(
-                get: { store.weeksWindow },
-                set: { store.setWeeksWindow($0) }
-            )) {
-                ForEach(store.allowedWeekWindows, id: \.self) { n in
-                    Text("\(n) wks").tag(n)
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
+            WeeksPopUpButton(
+                options: store.allowedWeekWindows,
+                selection: store.weeksWindow,
+                onSelect: { store.setWeeksWindow($0) }
+            )
             .fixedSize()
-            .focusEffectDisabled()
+        }
+    }
+}
+
+/// A menu-style weeks picker backed by `NSPopUpButton` so we can disable the
+/// AppKit focus ring. A SwiftUI `Picker` (even with `.focusEffectDisabled()`)
+/// still draws the accent focus ring whenever the window becomes key, which
+/// makes the control look permanently selected. Setting `focusRingType = .none`
+/// on the underlying button is the only reliable way to suppress it.
+private struct WeeksPopUpButton: NSViewRepresentable {
+    let options: [Int]
+    let selection: Int
+    let onSelect: (Int) -> Void
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.focusRingType = .none
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.selectionChanged(_:))
+        button.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        return button
+    }
+
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.onSelect = onSelect
+        context.coordinator.options = options
+
+        let titles = options.map { "\($0) wks" }
+        if button.itemTitles != titles {
+            button.removeAllItems()
+            button.addItems(withTitles: titles)
+        }
+        if let index = options.firstIndex(of: selection) {
+            button.selectItem(at: index)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(options: options, onSelect: onSelect)
+    }
+
+    final class Coordinator: NSObject {
+        var options: [Int]
+        var onSelect: (Int) -> Void
+
+        init(options: [Int], onSelect: @escaping (Int) -> Void) {
+            self.options = options
+            self.onSelect = onSelect
+        }
+
+        @objc func selectionChanged(_ sender: NSPopUpButton) {
+            let index = sender.indexOfSelectedItem
+            guard options.indices.contains(index) else { return }
+            onSelect(options[index])
         }
     }
 }
