@@ -565,6 +565,7 @@ private struct WindowControls: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
+            .focusEffectDisabled()
         }
     }
 }
