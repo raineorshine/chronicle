@@ -15,6 +15,13 @@ public struct ChronicleConfig: Codable, Equatable {
     /// A subtractive calendar is always extracted, even if not in the allowlist.
     public var subtractiveCalendars: [String]
 
+    /// Calendar display names (as shown in Apple Calendar) that render as a
+    /// single whole-calendar segment at the top level, instead of breaking out
+    /// into individual task segments. Matched case-insensitively. Display-only:
+    /// changing this never triggers re-extraction. Calendars absent from this
+    /// list use the default "by task" segmentation.
+    public var wholeCalendarSegments: [String]
+
     /// Rolling window: how many days into the past to rebuild.
     public var windowPastDays: Int
 
@@ -29,12 +36,14 @@ public struct ChronicleConfig: Codable, Equatable {
     public init(calendarAllowlist: [String] = [],
                 subtaskSeparator: String = " - ",
                 subtractiveCalendars: [String] = [],
+                wholeCalendarSegments: [String] = [],
                 windowPastDays: Int = 60,
                 windowFutureDays: Int = 14,
                 taskColors: [String: String] = [:]) {
         self.calendarAllowlist = calendarAllowlist
         self.subtaskSeparator = subtaskSeparator
         self.subtractiveCalendars = subtractiveCalendars
+        self.wholeCalendarSegments = wholeCalendarSegments
         self.windowPastDays = windowPastDays
         self.windowFutureDays = windowFutureDays
         self.taskColors = taskColors
@@ -44,7 +53,7 @@ public struct ChronicleConfig: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case calendarAllowlist, subtaskSeparator, subtractiveCalendars
-        case windowPastDays, windowFutureDays, taskColors
+        case wholeCalendarSegments, windowPastDays, windowFutureDays, taskColors
     }
 
     /// Tolerant decoding so configs written by older versions (which lack the
@@ -55,6 +64,7 @@ public struct ChronicleConfig: Codable, Equatable {
         calendarAllowlist = try c.decodeIfPresent([String].self, forKey: .calendarAllowlist) ?? d.calendarAllowlist
         subtaskSeparator = try c.decodeIfPresent(String.self, forKey: .subtaskSeparator) ?? d.subtaskSeparator
         subtractiveCalendars = try c.decodeIfPresent([String].self, forKey: .subtractiveCalendars) ?? d.subtractiveCalendars
+        wholeCalendarSegments = try c.decodeIfPresent([String].self, forKey: .wholeCalendarSegments) ?? d.wholeCalendarSegments
         windowPastDays = try c.decodeIfPresent(Int.self, forKey: .windowPastDays) ?? d.windowPastDays
         windowFutureDays = try c.decodeIfPresent(Int.self, forKey: .windowFutureDays) ?? d.windowFutureDays
         taskColors = try c.decodeIfPresent([String: String].self, forKey: .taskColors) ?? d.taskColors

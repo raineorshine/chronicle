@@ -48,6 +48,14 @@ final class DashboardStore: ObservableObject {
     /// Normalized titles of calendars currently marked subtractive.
     private var subtractiveTitleKeys: Set<String> = []
 
+    /// Normalized titles (trim + lowercase) of calendars set to whole-calendar
+    /// segment mode — mirrors config, used by the picker predicate.
+    private var wholeCalendarTitleKeys: Set<String> = []
+
+    /// `calendar_key` form of whole-calendar-mode calendars (matches
+    /// `daily_time.calendar_key`), passed to the bucketing to fold their tasks.
+    private var wholeCalendarKeys: Set<String> = []
+
     /// Week boundaries always start on Monday, independent of the locale's
     /// default first weekday.
     private let calendar: Calendar = {
@@ -138,10 +146,19 @@ final class DashboardStore: ObservableObject {
     private func reload(using db: Database) throws {
         let bounds = dateBounds
         let plan = queryPlan
-        let daily = try db.segmentDailySeries(selection: plan.scope,
-                                              dimension: plan.dimension,
-                                              from: bounds.from, to: bounds.to)
-        stacks = WeeklyBucketing.bucket(daily, calendar: calendar, topN: 8)
+        if selection.taskKey == nil {
+            // Top level: task-mode calendars break out into individual task
+            // segments; whole-calendar-mode calendars fold into one segment each
+            // (no top-N, no "Other").
+            let daily = try db.activityCalendarDailySeries(from: bounds.from, to: bounds.to)
+            stacks = WeeklyBucketing.bucketByCalendarSegmentMode(
+                daily, calendar: calendar, wholeCalendarKeys: wholeCalendarKeys)
+        } else {
+            let daily = try db.segmentDailySeries(selection: plan.scope,
+                                                  dimension: plan.dimension,
+                                                  from: bounds.from, to: bounds.to)
+            stacks = WeeklyBucketing.bucket(daily, calendar: calendar, topN: 8)
+        }
         segmentStyles = Self.styles(for: stacks.segments,
                                     dimension: plan.dimension,
                                     overrides: taskColors)
@@ -271,6 +288,8 @@ final class DashboardStore: ObservableObject {
             let color: Color
             if segment.isOther {
                 color = .gray
+            } else if segment.isCalendarBucket {
+                color = Color(hex: segment.colorHex) ?? .gray
             } else if dimension == .task, let hex = overrides[segment.key],
                       let override = Color(hex: hex) {
                 color = override
@@ -304,6 +323,28 @@ final class DashboardStore: ObservableObject {
             segmentStyles = Self.styles(for: stacks.segments,
                                         dimension: queryPlan.dimension,
                                         overrides: taskColors)
+            objectWillChange.send()
+        } catch {
+            errorMessage = "\(error)"
+        }
+    }
+
+    /// Sets whether a calendar renders as a single whole-calendar segment (vs.
+    /// the default per-task breakdown), persists it, and re-buckets the current
+    /// scope. Segmentation is display-only, so this never re-extracts from
+    /// Calendar.
+    func setCalendarSegmentMode(_ info: CalendarInfo, wholeCalendar: Bool) {
+        do {
+            var config = try ChronicleConfig.load()
+            let key = Self.normalizeTitle(info.title)
+            config.wholeCalendarSegments.removeAll { Self.normalizeTitle($0) == key }
+            if wholeCalendar {
+                config.wholeCalendarSegments.append(info.title)
+            }
+            try config.save()
+            wholeCalendarTitleKeys = Set(config.wholeCalendarSegments.map(Self.normalizeTitle))
+            wholeCalendarKeys = Set(config.wholeCalendarSegments.map { TitleParser.normalize($0).key })
+            reloadData()
             objectWillChange.send()
         } catch {
             errorMessage = "\(error)"
@@ -385,10 +426,12 @@ final class DashboardStore: ObservableObject {
     var isTaskLevel: Bool { selection.taskKey == nil }
 
     /// Drills into an activity segment so the chart re-stacks it by subtask.
-    /// No-op for the "Other" bucket or when already at subtask level. The
-    /// segment key is the (calendar-agnostic) task key.
+    /// No-op for the "Other" bucket, per-calendar buckets, or when already at
+    /// subtask level. The segment key is the (calendar-agnostic) task key.
     func drillInto(segmentKey key: String) {
-        guard isTaskLevel, key != WeeklyBucketing.otherKey else { return }
+        guard isTaskLevel,
+              key != WeeklyBucketing.otherKey,
+              !WeeklyBucketing.isCalendarBucketKey(key) else { return }
         select(HierarchySelection(taskKey: key), nodeID: "task:\(key)")
     }
 
@@ -432,6 +475,8 @@ final class DashboardStore: ObservableObject {
         if let config = try? ChronicleConfig.load() {
             allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
             subtractiveTitleKeys = Set(config.subtractiveCalendars.map(Self.normalizeTitle))
+            wholeCalendarTitleKeys = Set(config.wholeCalendarSegments.map(Self.normalizeTitle))
+            wholeCalendarKeys = Set(config.wholeCalendarSegments.map { TitleParser.normalize($0).key })
             taskColors = config.taskColors
         }
     }
@@ -442,6 +487,12 @@ final class DashboardStore: ObservableObject {
 
     func isCalendarSubtractive(_ info: CalendarInfo) -> Bool {
         subtractiveTitleKeys.contains(Self.normalizeTitle(info.title))
+    }
+
+    /// Whether a calendar renders as one whole-calendar segment at the top level
+    /// (as opposed to the default per-task breakdown).
+    func isCalendarWholeSegment(_ info: CalendarInfo) -> Bool {
+        wholeCalendarTitleKeys.contains(Self.normalizeTitle(info.title))
     }
 
     var selectedCalendarCount: Int { allowedTitleKeys.count }

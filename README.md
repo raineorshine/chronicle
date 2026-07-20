@@ -203,12 +203,16 @@ rm ~/Library/LaunchAgents/com.chronicle.extract.plist
 
 Launch **Chronicle.app**. The main view is a **weeks-on-X stacked bar chart**:
 each bar is one week over a trailing window (**4 / 8 / 12 weeks**, selectable),
-and each bar is split into colored segments — one per **activity** (Task) — so
-you can read the current week's mix, compare it against previous weeks, and see
-trends at a glance. The heaviest activities dominate each bar, so ranking is
-implicit; the long tail folds into a neutral **Other** segment. A legend names
-each segment and hovering a week shows a tooltip with its per-activity hours and
-total. The current (in-progress) week is drawn dimmed and marked with a dot.
+and each bar is split into colored segments. At the top level, **each visible
+calendar** is configured (in the Calendars picker) as one of two segment modes:
+**by task** (the default) breaks the calendar out into its individual activities,
+merged across calendars, so nothing meaningful hides in an aggregate; **whole
+calendar** folds all of that calendar's events into a single segment, colored
+with the calendar's own color. Task segments come first, ordered alphabetically
+for week-to-week visual continuity, followed by the whole-calendar segments. A
+legend names each segment and hovering a week shows a tooltip with its per-segment
+hours and total. The current (in-progress) week is drawn dimmed and marked with a
+dot.
 
 The header shows **this week's hours** with a colored **▲/▼ delta versus last
 week**, plus the window's occurrence count. The **sidebar** on the left is a flat
@@ -216,10 +220,13 @@ list of **activities** (Tasks) merged across all calendars — every activity in
 the selected window is listed, but each row shows its **current-week** hours
 (`0.0h` if idle this week) and the list is **sorted by those current-week hours**,
 each expandable to its subtasks.
-Segments **adapt to scope**: at the top level they are activities; click a legend
-entry — or a task in the sidebar — to drill into an activity and re-stack it by
-its **subtasks**. The back chevron in the header moves the scope up a level.
-**Refresh** re-extracts from your selected calendars (in-process) and reloads.
+Segments **adapt to scope**: at the top level they are task segments plus any
+whole-calendar segments; click a legend entry — or a task in the sidebar — to
+drill into an activity and re-stack it by its **subtasks** (this subtask view
+keeps the top activities plus a neutral **Other** bucket). Whole-calendar
+segments are not drillable. The back chevron in the header moves the scope up a
+level. **Refresh** re-extracts from your selected calendars (in-process) and
+reloads.
 
 ## Trying it without Calendar access (demo data)
 
@@ -251,9 +258,11 @@ the demo rows are automatically replaced the first time you extract real data.
   single transaction, so edited/moved/deleted/detached recurring events are
   handled automatically.
 - **Views.** The dashboard shows a trailing window of **N weeks** (4/8/12). A
-  per-day, per-segment series is read from the single `daily_time` table with SQL
-  aggregation, then bucketed into weeks in Swift (weeks start on **Monday**)
-  and reduced to the top activities plus an **Other** bucket.
+  per-day series is read from the single `daily_time` table with SQL aggregation,
+  then bucketed into weeks in Swift (weeks start on **Monday**). At the top level,
+  task-mode calendars become individual activity segments while whole-calendar-mode
+  calendars fold into one segment each; drilling into an activity re-stacks it by
+  subtask (top subtasks plus an **Other** bucket).
 
 ## Tests
 

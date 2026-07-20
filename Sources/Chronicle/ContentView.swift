@@ -341,8 +341,10 @@ private struct CalendarPicker: View {
 
                 Divider()
                 Text("Selected calendars are included in your metrics. The "
-                     + "minus icon marks a calendar subtractive — its time is "
-                     + "removed from overlapping events in other calendars.")
+                     + "columns icon toggles whether a calendar shows as one "
+                     + "whole-calendar segment or breaks out into individual "
+                     + "tasks. The minus icon marks a calendar subtractive — its "
+                     + "time is removed from overlapping events in other calendars.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -382,6 +384,8 @@ private struct CalendarPickerRow: View {
     let calendar: CalendarInfo
 
     private var isSubtractive: Bool { store.isCalendarSubtractive(calendar) }
+    private var isWholeSegment: Bool { store.isCalendarWholeSegment(calendar) }
+    private var isIncluded: Bool { store.isCalendarSelected(calendar) }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -400,6 +404,20 @@ private struct CalendarPickerRow: View {
             .toggleStyle(.checkbox)
 
             Spacer(minLength: 4)
+
+            Button {
+                store.setCalendarSegmentMode(calendar, wholeCalendar: !isWholeSegment)
+            } label: {
+                Image(systemName: isWholeSegment ? "rectangle.stack.fill" : "rectangle.split.3x1")
+                    .foregroundStyle(isWholeSegment ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!isIncluded)
+            .help(isWholeSegment
+                  ? "Whole calendar: this calendar shows as one segment. Click to "
+                    + "break it out into individual task segments."
+                  : "Segment by task (default): this calendar's tasks each show as "
+                    + "their own segment. Click to collapse it into one segment.")
 
             Button {
                 store.setSubtractive(calendar, subtractive: !isSubtractive)
@@ -577,8 +595,9 @@ private struct WeeklyChartCard: View {
     }
 }
 
-/// A tappable legend. At the activity level, clicking a segment drills into its
-/// subtasks; "Other" and the subtask level are non-interactive.
+/// A tappable legend. At the activity level, clicking a task segment drills
+/// into its subtasks; whole-calendar segments and the subtask level are
+/// non-interactive.
 private struct SegmentLegend: View {
     @ObservedObject var store: DashboardStore
 
@@ -587,7 +606,10 @@ private struct SegmentLegend: View {
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
             ForEach(store.segmentStyles) { style in
-                let isTask = store.isTaskLevel && style.key != WeeklyBucketing.otherKey
+                let isCalendarBucket = WeeklyBucketing.isCalendarBucketKey(style.key)
+                let isTask = store.isTaskLevel
+                    && style.key != WeeklyBucketing.otherKey
+                    && !isCalendarBucket
                 let drillable = isTask
                 HStack(spacing: 6) {
                     if isTask {
@@ -607,7 +629,8 @@ private struct SegmentLegend: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!drillable)
-                    .help(drillable ? "Break \(style.displayLabel) down by subtask" : "")
+                    .help(drillable ? "Break \(style.displayLabel) down by subtask"
+                          : isCalendarBucket ? "\(style.displayLabel) (whole calendar)" : "")
                 }
             }
         }
