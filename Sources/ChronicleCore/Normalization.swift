@@ -19,8 +19,8 @@ public enum TitleParser {
 
     /// Parses a raw event title into a Task and optional Subtask.
     /// Returns `nil` when the title has no usable Task after normalization.
-    public static func parse(_ raw: String, separator: String = " - ") -> ParsedTitle? {
-        let (taskPart, subtaskPart) = split(raw, separator: separator)
+    public static func parse(_ raw: String, separators: [String] = [" - ", " | "]) -> ParsedTitle? {
+        let (taskPart, subtaskPart) = split(raw, separators: separators)
 
         let task = normalize(taskPart)
         guard !task.isEmpty else { return nil }
@@ -32,12 +32,18 @@ public enum TitleParser {
         return ParsedTitle(task: task, subtask: nil)
     }
 
-    /// Splits a raw title on the first occurrence of the subtask separator.
-    /// Ordinary hyphenated words (no surrounding spaces) are not split.
-    static func split(_ raw: String, separator: String) -> (String, String?) {
-        guard !separator.isEmpty, let range = raw.range(of: separator) else {
-            return (raw, nil)
+    /// Splits a raw title on the earliest (leftmost) occurrence of any of the
+    /// subtask separators. Ordinary hyphenated words (no surrounding spaces) are
+    /// not split.
+    static func split(_ raw: String, separators: [String]) -> (String, String?) {
+        var best: Range<String.Index>?
+        for separator in separators where !separator.isEmpty {
+            guard let range = raw.range(of: separator) else { continue }
+            if best == nil || range.lowerBound < best!.lowerBound {
+                best = range
+            }
         }
+        guard let range = best else { return (raw, nil) }
         let task = String(raw[raw.startIndex..<range.lowerBound])
         let subtask = String(raw[range.upperBound...])
         return (task, subtask)

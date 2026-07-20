@@ -6,8 +6,10 @@ public struct ChronicleConfig: Codable, Equatable {
     /// Only events from these calendars are extracted. Empty means "none".
     public var calendarAllowlist: [String]
 
-    /// The only substring treated as a Task/Subtask separator.
-    public var subtaskSeparator: String
+    /// Substrings treated as Task/Subtask separators. A title is split on the
+    /// earliest (leftmost) occurrence of any of these. Defaults to `" - "` and
+    /// `" | "`; the surrounding spaces keep ordinary hyphenated words intact.
+    public var subtaskSeparators: [String]
 
     /// Calendar display names (as shown in Apple Calendar) treated as
     /// *subtractive*: their overlap is removed from events in other calendars,
@@ -34,14 +36,14 @@ public struct ChronicleConfig: Codable, Equatable {
     public var taskColors: [String: String]
 
     public init(calendarAllowlist: [String] = [],
-                subtaskSeparator: String = " - ",
+                subtaskSeparators: [String] = [" - ", " | "],
                 subtractiveCalendars: [String] = [],
                 wholeCalendarSegments: [String] = [],
                 windowPastDays: Int = 60,
                 windowFutureDays: Int = 14,
                 taskColors: [String: String] = [:]) {
         self.calendarAllowlist = calendarAllowlist
-        self.subtaskSeparator = subtaskSeparator
+        self.subtaskSeparators = subtaskSeparators
         self.subtractiveCalendars = subtractiveCalendars
         self.wholeCalendarSegments = wholeCalendarSegments
         self.windowPastDays = windowPastDays
@@ -52,8 +54,10 @@ public struct ChronicleConfig: Codable, Equatable {
     public static let `default` = ChronicleConfig()
 
     private enum CodingKeys: String, CodingKey {
-        case calendarAllowlist, subtaskSeparator, subtractiveCalendars
+        case calendarAllowlist, subtaskSeparators, subtractiveCalendars
         case wholeCalendarSegments, windowPastDays, windowFutureDays, taskColors
+        // Legacy single-separator key, decoded for migration only.
+        case subtaskSeparator
     }
 
     /// Tolerant decoding so configs written by older versions (which lack the
@@ -62,12 +66,32 @@ public struct ChronicleConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = ChronicleConfig.default
         calendarAllowlist = try c.decodeIfPresent([String].self, forKey: .calendarAllowlist) ?? d.calendarAllowlist
-        subtaskSeparator = try c.decodeIfPresent(String.self, forKey: .subtaskSeparator) ?? d.subtaskSeparator
+        // Prefer the new list; migrate a legacy single separator; else default.
+        if let separators = try c.decodeIfPresent([String].self, forKey: .subtaskSeparators) {
+            subtaskSeparators = separators
+        } else if let legacy = try c.decodeIfPresent(String.self, forKey: .subtaskSeparator) {
+            subtaskSeparators = [legacy]
+        } else {
+            subtaskSeparators = d.subtaskSeparators
+        }
         subtractiveCalendars = try c.decodeIfPresent([String].self, forKey: .subtractiveCalendars) ?? d.subtractiveCalendars
         wholeCalendarSegments = try c.decodeIfPresent([String].self, forKey: .wholeCalendarSegments) ?? d.wholeCalendarSegments
         windowPastDays = try c.decodeIfPresent(Int.self, forKey: .windowPastDays) ?? d.windowPastDays
         windowFutureDays = try c.decodeIfPresent(Int.self, forKey: .windowFutureDays) ?? d.windowFutureDays
         taskColors = try c.decodeIfPresent([String: String].self, forKey: .taskColors) ?? d.taskColors
+    }
+
+    /// Custom encoder that omits the legacy `subtaskSeparator` key, writing only
+    /// the current `subtaskSeparators` list.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(calendarAllowlist, forKey: .calendarAllowlist)
+        try c.encode(subtaskSeparators, forKey: .subtaskSeparators)
+        try c.encode(subtractiveCalendars, forKey: .subtractiveCalendars)
+        try c.encode(wholeCalendarSegments, forKey: .wholeCalendarSegments)
+        try c.encode(windowPastDays, forKey: .windowPastDays)
+        try c.encode(windowFutureDays, forKey: .windowFutureDays)
+        try c.encode(taskColors, forKey: .taskColors)
     }
 
     /// Loads config from disk. If the file is missing, writes and returns the
