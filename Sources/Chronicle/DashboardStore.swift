@@ -139,7 +139,9 @@ final class DashboardStore: ObservableObject {
     }
 
     /// Inclusive `yyyy-MM-dd` bounds covering the trailing `weeksWindow` weeks,
-    /// aligned to Monday week starts, up to today.
+    /// aligned to Monday week starts, through the end of the current week (Sunday)
+    /// so the in-progress week's chart point includes activities scheduled for the
+    /// rest of the week, not just those already elapsed.
     var dateBounds: (from: String, to: String) {
         let f = formatter()
         let today = calendar.startOfDay(for: Date())
@@ -147,21 +149,23 @@ final class DashboardStore: ObservableObject {
         let fromDate = calendar.date(byAdding: .weekOfYear,
                                      value: -(max(1, weeksWindow) - 1),
                                      to: thisWeek) ?? thisWeek
-        return (f.string(from: fromDate), f.string(from: today))
+        let weekEnd = calendar.date(byAdding: .day, value: 6, to: thisWeek) ?? today
+        return (f.string(from: fromDate), f.string(from: weekEnd))
     }
 
-    /// Compact `M/d – M/d` label for the current window bounds, e.g. `6/29 – 7/20`.
+    /// Compact `M/d – M/d` label for the current window bounds, e.g. `6/29 – 7/26`.
     var dateBoundsShort: String {
         let today = calendar.startOfDay(for: Date())
         let thisWeek = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
         let fromDate = calendar.date(byAdding: .weekOfYear,
                                      value: -(max(1, weeksWindow) - 1),
                                      to: thisWeek) ?? thisWeek
+        let weekEnd = calendar.date(byAdding: .day, value: 6, to: thisWeek) ?? today
         let short = DateFormatter()
         short.calendar = calendar
         short.locale = calendar.locale ?? Locale(identifier: "en_US")
         short.dateFormat = "M/d"
-        return "\(short.string(from: fromDate)) – \(short.string(from: today))"
+        return "\(short.string(from: fromDate)) – \(short.string(from: weekEnd))"
     }
 
     /// `yyyy-MM-dd` of the first day of the metrics week — the just-completed
