@@ -271,7 +271,7 @@ private struct DashboardDetail: View {
             Spacer()
         }
         .padding(20)
-        .frame(minWidth: 640, minHeight: 460)
+        .frame(minWidth: 640, minHeight: 460, maxHeight: .infinity, alignment: .top)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 CalendarPickerButton(store: store)
