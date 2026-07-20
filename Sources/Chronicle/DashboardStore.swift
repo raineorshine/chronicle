@@ -214,6 +214,12 @@ final class DashboardStore: ObservableObject {
     func weekDate(_ week: String) -> Date { formatter().date(from: week) ?? Date() }
 
 
+    /// Total recorded hours across all listed tasks for the current week — the
+    /// denominator for each sidebar task's weekly share bar.
+    var weeklyHoursTotal: Double {
+        taskList.reduce(0) { $0 + $1.hours }
+    }
+
     /// Total hours per week, ascending by week start.
     var weekTotals: [(weekStart: String, hours: Double)] {
         var byWeek: [String: Double] = [:]

@@ -76,30 +76,64 @@ private struct TaskRow: View {
     }
 
     private var taskRow: some View {
-        HStack(spacing: 6) {
-            TaskColorSwatch(store: store, taskKey: task.key)
-            Button {
-                store.select(HierarchySelection(taskKey: task.key), nodeID: nodeID)
-            } label: {
-                HStack(spacing: 6) {
-                    Text(task.label)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text(Self.hours(task.hours))
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                TaskColorSwatch(store: store, taskKey: task.key)
+                Button {
+                    store.select(HierarchySelection(taskKey: task.key), nodeID: nodeID)
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(task.label)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(Self.hours(task.hours))
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            HoursShareBar(fraction: shareFraction,
+                          color: store.taskColor(forKey: task.key))
         }
         .listRowBackground(store.selectedNodeID == nodeID
                            ? Color.accentColor.opacity(0.18) : Color.clear)
     }
 
+    /// This task's share of the week's total recorded hours (0...1).
+    private var shareFraction: Double {
+        let total = store.weeklyHoursTotal
+        guard total > 0 else { return 0 }
+        return min(1, max(0, task.hours / total))
+    }
+
     private static func hours(_ h: Double) -> String {
         String(format: "%.1fh", h)
+    }
+}
+
+/// A thin horizontal bar showing a task's share of the week's total recorded
+/// hours. The faint track spans the full width; the tinted fill spans `fraction`.
+private struct HoursShareBar: View {
+    let fraction: Double
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.08))
+                Capsule()
+                    .fill(color)
+                    .frame(width: max(0, geo.size.width * fraction))
+            }
+        }
+        .frame(height: 3)
+        .accessibilityElement()
+        .accessibilityLabel("Share of weekly hours")
+        .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
     }
 }
 
