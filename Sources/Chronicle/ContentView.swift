@@ -50,8 +50,6 @@ private struct TaskRow: View {
     @ObservedObject var store: DashboardStore
     let task: TaskSummary
 
-    @State private var isHovering = false
-
     private var nodeID: String { "task:\(task.key)" }
 
     var body: some View {
@@ -109,7 +107,6 @@ private struct TaskRow: View {
                           color: store.taskColor(forKey: task.key))
         }
         .onHover { hovering in
-            isHovering = hovering
             if hovering {
                 store.setHighlight(task.key)
             } else if store.highlightedSegmentKey == task.key {
@@ -117,7 +114,6 @@ private struct TaskRow: View {
             }
         }
         .listRowBackground(RowHoverBackground(isSelected: store.selectedNodeID == nodeID,
-                                              isHovering: isHovering,
                                               isHighlighted: store.isHighlighted(task.key)))
     }
 
@@ -254,10 +250,17 @@ private struct SelectableRow: View {
     var indent: Int = 0
     var detail: String? = nil
     var isHighlighted: Bool = false
-    var onHoverChanged: (Bool) -> Void = { _ in }
+    /// When provided, the row participates in the shared cross-surface highlight
+    /// (keyed) and its tint is driven solely by `isHighlighted`. When nil, the row
+    /// is non-cross-lit (e.g. "All Tasks") and falls back to its own local hover.
+    var onHoverChanged: ((Bool) -> Void)? = nil
     let action: () -> Void
 
     @State private var isHovering = false
+
+    private var showsTint: Bool {
+        onHoverChanged == nil ? isHovering : isHighlighted
+    }
 
     var body: some View {
         Button(action: action) {
@@ -281,31 +284,30 @@ private struct SelectableRow: View {
         .buttonStyle(.plain)
         .onHover { hovering in
             isHovering = hovering
-            onHoverChanged(hovering)
+            onHoverChanged?(hovering)
         }
         .listRowBackground(RowHoverBackground(isSelected: isSelected,
-                                              isHovering: isHovering,
-                                              isHighlighted: isHighlighted))
+                                              isHighlighted: showsTint))
     }
 }
 
 /// Shared row background that folds hover into selection styling: a selected row
-/// keeps its accent tint, an un-selected hovered row shows a subtle highlight,
-/// and everything else is clear. The change is animated for a gentle fade.
+/// keeps its accent tint, an un-selected highlighted row shows a subtle
+/// highlight, and everything else is clear. The change is animated for a gentle
+/// fade. Highlight is driven by the store's single shared hover key (or, for
+/// non-cross-lit rows, the row's own local hover), so at most one row lights up.
 private struct RowHoverBackground: View {
     let isSelected: Bool
-    let isHovering: Bool
     var isHighlighted: Bool = false
 
     private var fill: Color {
         if isSelected { return Color.accentColor.opacity(0.18) }
-        if isHovering || isHighlighted { return Color.primary.opacity(0.08) }
+        if isHighlighted { return Color.primary.opacity(0.08) }
         return Color.clear
     }
 
     var body: some View {
-        fill.animation(.easeOut(duration: 0.12), value: isHovering)
-            .animation(.easeInOut(duration: 0.15), value: isHighlighted)
+        fill.animation(.easeInOut(duration: 0.12), value: isHighlighted)
     }
 }
 
