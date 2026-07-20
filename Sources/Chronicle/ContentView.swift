@@ -288,6 +288,12 @@ private struct DashboardDetail: View {
                 }
                 .disabled(store.isRefreshing)
             }
+            ToolbarItem(placement: .primaryAction) {
+                SettingsLink {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .help("Open Settings")
+            }
         }
     }
 
@@ -650,13 +656,23 @@ private struct WeeklyChartCard: View {
     }
 
     private var chart: some View {
-        Chart(store.stacks.points) { point in
-            BarMark(
-                x: .value("Week", point.weekStart),
-                y: .value("Hours", point.hours)
-            )
-            .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
-            .opacity(1.0)
+        Chart(store.chartPoints) { point in
+            if store.chartStyle == .area {
+                AreaMark(
+                    x: .value("Week", point.weekStart),
+                    y: .value("Hours", point.hours)
+                )
+                .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
+                .interpolationMethod(.linear)
+                .opacity(1.0)
+            } else {
+                BarMark(
+                    x: .value("Week", point.weekStart),
+                    y: .value("Hours", point.hours)
+                )
+                .foregroundStyle(by: .value("Activity", store.displayLabel(forSegment: point.segmentKey)))
+                .opacity(1.0)
+            }
         }
         .chartForegroundStyleScale(domain: store.styleDomain, range: store.styleRange)
         .chartXScale(domain: store.windowWeekStarts)

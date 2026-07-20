@@ -18,6 +18,35 @@ final class DashboardStore: ObservableObject {
     /// in-progress week). One of `allowedWeekWindows`.
     @Published var weeksWindow: Int = 4
 
+    /// How the weekly chart is rendered (stacked area vs stacked bar). Persisted
+    /// to `UserDefaults` so the choice survives relaunches; changed from Settings.
+    @Published var chartStyle: ChartStyle =
+        ChartStyle(rawValue: UserDefaults.standard.string(forKey: DashboardStore.chartStyleDefaultsKey) ?? "")
+        ?? .area {
+        didSet {
+            guard chartStyle != oldValue else { return }
+            UserDefaults.standard.set(chartStyle.rawValue, forKey: DashboardStore.chartStyleDefaultsKey)
+        }
+    }
+
+    private static let chartStyleDefaultsKey = "chartStyle"
+
+    /// The visual style of the weekly chart, chosen in Settings.
+    enum ChartStyle: String, CaseIterable, Identifiable {
+        case area
+        case bar
+
+        var id: String { rawValue }
+
+        /// User-facing label for the Settings picker.
+        var label: String {
+            switch self {
+            case .area: return "Stacked Area"
+            case .bar: return "Stacked Bar"
+            }
+        }
+    }
+
     /// Bucketed weekly stacks for the current scope + window.
     @Published var stacks: WeeklyStacks = .empty
     /// Segment styles (display label + color) in stacking / legend order.
@@ -216,10 +245,11 @@ final class DashboardStore: ObservableObject {
 
     /// Resolves the stacked segment at `week` whose cumulative band contains the
     /// hovered hours value `hours` (as read from the chart's Y scale). Walks the
-    /// week's points in `stacks.points` order — the exact order the marks are
-    /// drawn by `Chart(store.stacks.points)`, which is how Swift Charts stacks
-    /// them (first point == bottom). Returns `nil` when the value is below zero,
-    /// above the week's total, or lands on a segment with no hours.
+    /// week's points in `stacks.points` order (sorted by `segmentKey`) — the same
+    /// per-week bottom→top band order both chart styles draw from `chartPoints`, which
+    /// is how Swift Charts stacks them (first point == bottom). Returns `nil` when
+    /// the value is below zero, above the week's total, or lands on a segment with
+    /// no hours.
     func segment(inWeek week: String, atHours hours: Double) -> HoveredSegment? {
         guard hours >= 0 else { return nil }
         var base = 0.0
@@ -274,6 +304,35 @@ final class DashboardStore: ObservableObject {
         var byWeek: [String: Double] = [:]
         for p in stacks.points { byWeek[p.weekStart, default: 0] += p.hours }
         return byWeek.keys.sorted().map { ($0, byWeek[$0] ?? 0) }
+    }
+
+    /// Zero-filled series feeding the weekly chart. Unlike `stacks.points` (which is
+    /// sparse — only cells with hours exist), a stacked `AreaMark` needs a value for
+    /// every segment at every week in the window; otherwise a segment missing a week
+    /// interpolates across the gap and distorts the stack baseline. Bars tolerate
+    /// sparse data, but zero-height bars draw nothing, so this single zero-filled
+    /// series drives both the area and bar styles.
+    /// Points are ordered per-week by `segmentKey`, matching the bottom→top band
+    /// order that `segment(inWeek:atHours:)` walks, so hover resolution stays correct
+    /// (zero-hour fillers contribute nothing and are skipped by that walk).
+    var chartPoints: [WeeklyStackPoint] {
+        let weeks = windowWeekStarts
+        guard !weeks.isEmpty, !stacks.segments.isEmpty else { return stacks.points }
+
+        var hoursByCell: [String: Double] = [:]
+        for p in stacks.points { hoursByCell["\(p.weekStart)|\(p.segmentKey)"] = p.hours }
+
+        let segments = stacks.segments.sorted { $0.key < $1.key }
+        var result: [WeeklyStackPoint] = []
+        result.reserveCapacity(weeks.count * segments.count)
+        for week in weeks {
+            for segment in segments {
+                let hours = hoursByCell["\(week)|\(segment.key)"] ?? 0
+                result.append(WeeklyStackPoint(weekStart: week, segmentKey: segment.key,
+                                               segmentLabel: segment.label, hours: hours))
+            }
+        }
+        return result
     }
 
     // MARK: - Segment styling
