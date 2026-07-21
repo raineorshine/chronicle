@@ -43,15 +43,15 @@ final class NormalizationTests: XCTestCase {
         // "a - b | c" -> split at the leftmost separator; the rest stays in the subtask.
         let parsed = TitleParser.parse("a - b | c")
         XCTAssertEqual(parsed?.task.label, "a")
-        // The pipe is stripped as punctuation during normalization of the subtask.
-        XCTAssertEqual(parsed?.subtask?.label, "b c")
+        // Punctuation is preserved in the label, so the trailing pipe is kept.
+        XCTAssertEqual(parsed?.subtask?.label, "b | c")
     }
 
     func testPipeWithoutSpacesIsNotSplit() {
         // No spaces around the pipe -> not a separator.
         let parsed = TitleParser.parse("a|b")
         XCTAssertNil(parsed?.subtask)
-        XCTAssertEqual(parsed?.task.label, "ab") // pipe stripped as punctuation
+        XCTAssertEqual(parsed?.task.label, "a|b") // pipe preserved in label
     }
 
     func testPlainTaskHasNoSubtask() {
@@ -64,7 +64,40 @@ final class NormalizationTests: XCTestCase {
         // No spaces around the hyphen -> not a separator.
         let parsed = TitleParser.parse("Well-being")
         XCTAssertNil(parsed?.subtask)
-        XCTAssertEqual(parsed?.task.label, "Wellbeing") // hyphen stripped as punctuation
+        XCTAssertEqual(parsed?.task.label, "Well-being") // hyphen preserved in label
+        XCTAssertEqual(parsed?.task.key, "wellbeing")    // key still strips punctuation
+    }
+
+    func testPunctuationPreservedInLabelStrippedFromKey() {
+        // "R&D" keeps its ampersand in the label but groups with "RD" via the key.
+        let rd = TitleParser.parse("R&D")
+        XCTAssertEqual(rd?.task.label, "R&D")
+        XCTAssertEqual(rd?.task.key, "rd")
+        XCTAssertEqual(TitleParser.parse("RD")?.task.key, rd?.task.key)
+    }
+
+    func testBarePercentTokenStripped() {
+        // Bare "%2" is removed as a standalone token, keeping surrounding text.
+        let parsed = TitleParser.parse("Code Reviews %2")
+        XCTAssertEqual(parsed?.task.label, "Code Reviews")
+        XCTAssertEqual(parsed?.task.key, "code reviews")
+        XCTAssertNil(parsed?.subtask)
+    }
+
+    func testPercentTokenStrippedMidTitle() {
+        let parsed = TitleParser.parse("%3 standup notes")
+        XCTAssertEqual(parsed?.task.label, "standup notes")
+    }
+
+    func testBarePercentTokenOnlyBecomesNil() {
+        XCTAssertNil(TitleParser.parse("%2"))
+    }
+
+    func testPercentTokenRespectsWordBoundaries() {
+        // Not a standalone token -> left intact.
+        XCTAssertEqual(TitleParser.parse("a%2b")?.task.label, "a%2b")
+        // A trailing percent with no digits is ordinary punctuation, kept in label.
+        XCTAssertEqual(TitleParser.parse("50% done")?.task.label, "50% done")
     }
 
     func testCaseInsensitiveKeyPreservesLabel() {

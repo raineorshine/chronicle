@@ -100,16 +100,23 @@ Apply in this order:
 
 1.  Unicode normalize.
 2.  Remove parenthesized metadata (for example `(%2)`).
-3.  Remove punctuation except the configured subtask separator. Emoji are kept.
+3.  Remove bare `%n` tokens (for example `%2`, `%3`) that appear as standalone
+    tokens (on word boundaries).
 4.  Collapse whitespace.
 5.  Trim.
-6.  The result is the canonical display **label**, which preserves emoji and case.
-7.  The comparison **key** is the label with emoji removed and lowercased, compared
-    case-insensitively.
+6.  The result is the canonical display **label**, which preserves punctuation,
+    emoji, and case.
+7.  The comparison **key** is the label with emoji and punctuation removed and
+    lowercased, compared case-insensitively.
 
-> Note: parenthesized metadata is removed **before** generic punctuation.
-> Stripping punctuation first would delete the parentheses and make the
-> `(...)` metadata undetectable.
+> Note: parenthesized metadata is removed **before** the `%n` pass, so a
+> parenthesized `(%2)` is stripped as metadata rather than surviving as a bare
+> token. Punctuation is intentionally kept in the display label and only removed
+> when deriving the comparison key.
+
+> Note: because punctuation is dropped from the **key** (but kept in the label),
+> activities that differ only by punctuation (e.g. `R&D` and `RD`) group together
+> for hours, the sidebar, and the chart legend, while each retains its own label.
 
 > Note: emoji stay in the display label but are excluded from the comparison key, so
 > activities that differ only by emoji (e.g. `🚶Walk` and `👟Walk`) are treated as one

@@ -289,9 +289,9 @@ the demo rows are automatically replaced the first time you extract real data.
 ## How it works
 
 - **Parsing.** Titles are split on `" - "` or `" | "` into Task/Subtask, then each part is
-  NFC-normalized, stripped of emoji, parenthesized metadata, and punctuation,
-  whitespace-collapsed, and trimmed. A lowercased **key** is used for grouping;
-  the cleaned original casing is kept as the **label**.
+  NFC-normalized, with parenthesized metadata and bare `%n` tokens (e.g. `%2`) removed,
+  whitespace-collapsed, and trimmed. Punctuation and emoji are preserved in the display
+  **label**; the grouping **key** lowercases the label with emoji and punctuation removed.
 - **Aggregation.** All-day events are skipped; events are clipped to the window
   and split across local midnight into per-day duration segments. One occurrence
   is counted on the day the event starts. Time from **subtractive** calendars is

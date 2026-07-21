@@ -5,16 +5,19 @@ import Foundation
 /// Pipeline for each component (see spec "Normalization Rules"):
 /// 1. Unicode NFC normalize.
 /// 2. Remove parenthesized metadata, e.g. `(%2)`.
-/// 3. Remove remaining punctuation/symbols (emoji are kept).
+/// 3. Remove bare `%n` tokens (e.g. `%2`, `%3`) on word boundaries.
 /// 4. Collapse whitespace.
 /// 5. Trim.
-/// 6. The result is the display `label`, which *preserves emoji* and original case.
-/// 7. The comparison `key` is the label with emoji removed and lowercased, so tasks
-///    that differ only by emoji (e.g. `🚶Walk` vs `👟Walk`) collapse to one activity.
+/// 6. The result is the display `label`, which *preserves punctuation and emoji*
+///    and original case.
+/// 7. The comparison `key` is the label with emoji removed, punctuation stripped,
+///    and lowercased, so tasks that differ only by emoji (e.g. `🚶Walk` vs `👟Walk`)
+///    or punctuation (e.g. `R&D` vs `RD`) collapse to one activity.
 ///
-/// Note: parenthesized metadata is removed *before* generic punctuation.
-/// Stripping punctuation first would delete the parentheses and make the
-/// `(...)` metadata undetectable.
+/// Note: parenthesized metadata is removed *before* the `%n` pass, otherwise a
+/// parenthesized `(%2)` would need to survive as bare `%2` to be caught later.
+/// Punctuation is intentionally *kept* in the display label and only removed when
+/// deriving the comparison key.
 public enum TitleParser {
 
     /// Parses a raw event title into a Task and optional Subtask.
@@ -50,17 +53,18 @@ public enum TitleParser {
     }
 
     /// Runs the normalization pipeline on a single component and produces a
-    /// `NormalizedName`. The `label` preserves emoji (and original case) for
-    /// display; the `key` strips emoji and lowercases so activities that differ
-    /// only by emoji group together.
+    /// `NormalizedName`. The `label` preserves punctuation, emoji, and original
+    /// case for display; the `key` strips emoji and punctuation and lowercases so
+    /// activities that differ only by emoji or punctuation group together.
     public static func normalize(_ component: String) -> NormalizedName {
         var text = component.precomposedStringWithCanonicalMapping   // 1. NFC
         text = removeParenthesizedMetadata(text)                     // 2. (...)
-        text = removePunctuation(text)                               // 3. punctuation (emoji kept)
-        text = collapseWhitespace(text)                             // 4. + 5.
+        text = removePercentTokens(text)                             // 3. bare %n
+        text = collapseWhitespace(text)                              // 4. + 5.
         let label = text
-        // The key ignores emoji so `🚶Walk` and `👟Walk` map to the same activity.
-        let key = collapseWhitespace(removeEmoji(label)).lowercased()
+        // The key ignores emoji and punctuation so `🚶Walk`/`👟Walk` and
+        // `R&D`/`RD` each map to a single activity.
+        let key = collapseWhitespace(removePunctuation(removeEmoji(label))).lowercased()
         return NormalizedName(label: label, key: key)
     }
 
@@ -90,6 +94,18 @@ public enum TitleParser {
         default:
             return false
         }
+    }
+
+    private static func removePercentTokens(_ s: String) -> String {
+        // Remove bare percent tokens like `%2`, `%3` that appear as standalone
+        // tokens (word boundaries), while leaving things like `50%` or `a%2b`
+        // untouched. Parenthesized `(%2)` is already handled upstream.
+        let pattern = "(?<![A-Za-z0-9])%[0-9]+(?![A-Za-z0-9])"
+        return s.replacingOccurrences(
+            of: pattern,
+            with: "",
+            options: .regularExpression
+        )
     }
 
     private static func removeParenthesizedMetadata(_ s: String) -> String {
