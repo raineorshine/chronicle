@@ -65,6 +65,8 @@ private struct TaskRow: View {
                                       systemImage: "circle.fill",
                                       indent: 1,
                                       detail: Self.hours(sub.hours),
+                                      isRecurring: store.isRecurring(taskKey: task.key,
+                                                                     subtaskKey: sub.key),
                                       isHighlighted: store.isHighlighted(sub.key),
                                       onHoverChanged: { hovering in
                                           if hovering {
@@ -93,6 +95,9 @@ private struct TaskRow: View {
                     HStack(spacing: 6) {
                         Text(task.label)
                             .lineLimit(1)
+                        if store.isRecurring(taskKey: task.key) {
+                            RecurringMarker()
+                        }
                         Spacer(minLength: 8)
                         Text(Self.hours(task.hours))
                             .font(.caption)
@@ -127,6 +132,19 @@ private struct TaskRow: View {
 
     private static func hours(_ h: Double) -> String {
         String(format: "%.1fh", h)
+    }
+}
+
+/// Marks a sidebar task that still has a recurring event scheduled ahead of it.
+/// Uses the same glyph Apple Calendar puts on a repeating event, so it reads as
+/// "this repeats" rather than as an action.
+private struct RecurringMarker: View {
+    var body: some View {
+        Image(systemName: "repeat")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .help("Recurs in the future")
+            .accessibilityLabel("Recurring")
     }
 }
 
@@ -250,6 +268,7 @@ private struct SelectableRow: View {
     let systemImage: String
     var indent: Int = 0
     var detail: String? = nil
+    var isRecurring: Bool = false
     var isHighlighted: Bool = false
     /// When provided, the row participates in the shared cross-surface highlight
     /// (keyed) and its tint is driven solely by `isHighlighted`. When nil, the row
@@ -271,6 +290,9 @@ private struct SelectableRow: View {
                     .foregroundStyle(.secondary)
                 Text(title)
                     .lineLimit(1)
+                if isRecurring {
+                    RecurringMarker()
+                }
                 Spacer(minLength: 8)
                 if let detail {
                     Text(detail)

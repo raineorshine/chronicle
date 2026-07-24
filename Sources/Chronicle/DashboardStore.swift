@@ -77,6 +77,12 @@ final class DashboardStore: ObservableObject {
     /// user has left cannot overwrite the current count.
     private var replacementPreviewToken = 0
 
+    /// The tasks and subtasks that still have a recurring event scheduled ahead
+    /// of now, marked as such in the sidebar. Read from EventKit alongside a
+    /// load, so it is empty until the first scan lands (and while access is
+    /// missing).
+    @Published private(set) var recurringIdentities: Set<TaskIdentity> = []
+
     /// Transient, non-persisted key of the segment currently emphasized by hover.
     /// A single shared value drives cross-highlighting across the chart, the
     /// legend, and the left sidebar (all keyed by the same normalized-title key).
@@ -230,6 +236,37 @@ final class DashboardStore: ObservableObject {
         // Reflect the current authorization state and, if already granted,
         // populate the picker without prompting.
         refreshCalendarAccessState()
+        refreshRecurringTasks()
+    }
+
+    /// Rescans upcoming events for the tasks and subtasks that recur, which
+    /// drives the sidebar marker. Runs off a load (not `reloadData`), so merely
+    /// changing the selection or the week window doesn't re-hit EventKit.
+    private func refreshRecurringTasks() {
+        guard CalendarExtractor.authorizationStatus == .fullAccess,
+              let config = try? ChronicleConfig.load() else {
+            recurringIdentities = []
+            return
+        }
+        Task {
+            let identities = RecurringTaskReader().futureRecurringIdentities(config: config)
+            await MainActor.run {
+                // The sidebar lists canonical keys, so a series still titled
+                // with a pre-rename name marks the scope it merges into.
+                self.recurringIdentities = Set(identities.map {
+                    let canonical = self.canonicalIdentity(taskKey: $0.taskKey,
+                                                           subtaskKey: $0.subtaskKey)
+                    return TaskIdentity(taskKey: canonical.taskKey,
+                                        subtaskKey: canonical.subtaskKey)
+                })
+            }
+        }
+    }
+
+    /// Whether this task — or, with `subtaskKey`, that one subtask under it —
+    /// has a recurring event scheduled ahead of now.
+    func isRecurring(taskKey key: String, subtaskKey: String? = nil) -> Bool {
+        recurringIdentities.contains(TaskIdentity(taskKey: key, subtaskKey: subtaskKey))
     }
 
     func reloadData() {
