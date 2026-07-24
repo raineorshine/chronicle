@@ -63,7 +63,11 @@ BRANCH=$(git branch --show-current) && MAIN=$(git worktree list | head -1 | awk 
 
 Repeat until the fast-forward succeeds. Because `main`'s ref only advances via this atomic `--ff-only` step, at most one worktree wins each round and the others simply rebase and retry — no merge commits, no clobbering.
 
-### 6. Post-merge
+### 6. Install
+
+Run ./scripts/install-app.sh to install the new build to /Applications.
+
+### 7. Post-merge
 
 - Push `main` to the remote from the main worktree:
 
