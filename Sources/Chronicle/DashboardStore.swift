@@ -627,8 +627,9 @@ final class DashboardStore: ObservableObject {
                             : "No future events matching this selection were found to replace."
                         return
                     }
-                    // Re-extract so the dashboard picks up the new title.
-                    self.refresh()
+                    // Re-extract so the dashboard picks up the new title, then
+                    // follow the selection over to the renamed activity.
+                    self.refresh { self.selectReplacedScope(newTitle: title) }
                 }
             } catch {
                 await MainActor.run {
@@ -637,6 +638,40 @@ final class DashboardStore: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Moves the selection onto the activity `newTitle` now names, so a replace
+    /// lands on the renamed task rather than stranding the user on the old one
+    /// (which, from today onward, is empty).
+    ///
+    /// The title is parsed the same way the extractor parses an event title, so
+    /// `Email - Triage` selects the `triage` subtask of `email`, and then mapped
+    /// through the rename aliases because the sidebar lists canonical keys. If
+    /// the new scope isn't in the list — the replacement only touched events
+    /// beyond the current window — the selection is left alone.
+    private func selectReplacedScope(newTitle: String) {
+        guard let parsed = TitleParser.parse(newTitle, separators: subtaskSeparators) else { return }
+        let (taskKey, subtaskKey) = canonicalIdentity(taskKey: parsed.task.key,
+                                                      subtaskKey: parsed.subtask?.key)
+        guard let task = taskList.first(where: { $0.key == taskKey }) else { return }
+        if let subtaskKey, task.subtasks.contains(where: { $0.key == subtaskKey }) {
+            select(HierarchySelection(taskKey: taskKey, subtaskKey: subtaskKey),
+                   nodeID: "sub:\(taskKey):\(subtaskKey)")
+        } else {
+            select(HierarchySelection(taskKey: taskKey), nodeID: "task:\(taskKey)")
+        }
+    }
+
+    /// Applies the configured rename aliases to a task/subtask identity, matching
+    /// what `openDatabase` applies at read time so the result lines up with the
+    /// keys in `taskList`. Unaliased identities pass through unchanged.
+    private func canonicalIdentity(taskKey: String,
+                                   subtaskKey: String?) -> (taskKey: String, subtaskKey: String?) {
+        let alias = AliasResolver.resolve(chains: aliasChains).first {
+            $0.fromTaskKey == taskKey && $0.fromSubtaskKey == subtaskKey
+        }
+        guard let alias else { return (taskKey, subtaskKey) }
+        return (alias.toTaskKey, alias.toSubtaskKey)
     }
 
     // MARK: - Selection
@@ -974,7 +1009,12 @@ final class DashboardStore: ObservableObject {
     /// rebuilds the rolling window directly from EventKit. Running in-process
     /// means macOS attributes the permission request to Chronicle itself, so
     /// the prompt appears and the app registers under Privacy > Calendars.
-    func refresh() {
+    ///
+    /// `then` runs on the main actor once the reloaded data is published, for
+    /// callers that need to act on the new task list (e.g. re-selecting a
+    /// renamed task). It is skipped when the refresh fails or is already in
+    /// flight.
+    func refresh(then: (() -> Void)? = nil) {
         guard !isRefreshing else { return }
         isRefreshing = true
         errorMessage = nil
@@ -993,6 +1033,7 @@ final class DashboardStore: ObservableObject {
                             + "Calendars button in the toolbar to choose which "
                             + "calendars to include."
                     }
+                    then?()
                 }
             } catch {
                 await MainActor.run {
