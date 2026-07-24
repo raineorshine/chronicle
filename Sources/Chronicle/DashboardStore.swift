@@ -176,21 +176,6 @@ final class DashboardStore: ObservableObject {
         return (f.string(from: fromDate), f.string(from: weekEnd))
     }
 
-    /// Compact `M/d – M/d` label for the current window bounds, e.g. `6/29 – 7/26`.
-    var dateBoundsShort: String {
-        let today = calendar.startOfDay(for: Date())
-        let thisWeek = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
-        let fromDate = calendar.date(byAdding: .weekOfYear,
-                                     value: -(max(1, weeksWindow) - 1),
-                                     to: thisWeek) ?? thisWeek
-        let weekEnd = calendar.date(byAdding: .day, value: 6, to: thisWeek) ?? today
-        let short = DateFormatter()
-        short.calendar = calendar
-        short.locale = calendar.locale ?? Locale(identifier: "en_US")
-        short.dateFormat = "M/d"
-        return "\(short.string(from: fromDate)) – \(short.string(from: weekEnd))"
-    }
-
     /// `yyyy-MM-dd` of the first day of the metrics week — the just-completed
     /// week the sidebar/legend tallies cover. Before `weeklyMetricsCutoff` this
     /// is the previous week; on or after it, the current week.

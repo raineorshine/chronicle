@@ -1058,9 +1058,6 @@ private struct WindowControls: View {
     var body: some View {
         HStack(spacing: 12) {
             Spacer()
-            Text(store.dateBoundsShort)
-                .font(.caption).foregroundStyle(.secondary)
-
             WeeksPopUpButton(
                 options: store.allowedWeekWindows,
                 selection: store.weeksWindow,
