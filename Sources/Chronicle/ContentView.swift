@@ -336,6 +336,7 @@ private struct RowHoverBackground: View {
 
 private struct DashboardDetail: View {
     @ObservedObject var store: DashboardStore
+    @State private var isShowingReplaceSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -393,6 +394,23 @@ private struct DashboardDetail: View {
                     .disabled(!showsBackButton)
                     .accessibilityHidden(!showsBackButton)
                     Text(selectionTitle).font(.title2).bold()
+                    if let scope = replaceableScope {
+                        Button {
+                            isShowingReplaceSheet = true
+                        } label: {
+                            Label("Replace…", systemImage: "arrow.left.arrow.right")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .disabled(store.isReplacing || store.isRefreshing)
+                        .help("Replace this title on every future event, from today onward")
+                        .sheet(isPresented: $isShowingReplaceSheet) {
+                            ReplaceTaskSheet(store: store,
+                                             taskKey: scope.taskKey,
+                                             subtaskKey: scope.subtaskKey,
+                                             currentTitle: store.currentEventTitle)
+                        }
+                    }
                 }
                 Text(store.isTaskLevel ? "Hours per activity by week"
                                        : "Subtask breakdown by week")
@@ -404,6 +422,14 @@ private struct DashboardDetail: View {
 
     private var showsBackButton: Bool {
         store.selectedNodeID != "all"
+    }
+
+    /// The task (and optionally subtask) whose page is showing, or nil at the
+    /// "All Tasks" scope, which spans too many distinct titles to replace.
+    /// A subtask scope replaces only that subtask's events.
+    private var replaceableScope: (taskKey: String, subtaskKey: String?)? {
+        guard let taskKey = store.selection.taskKey else { return nil }
+        return (taskKey, store.selection.subtaskKey)
     }
 
     private var selectionTitle: String {
@@ -431,6 +457,77 @@ private struct DashboardDetail: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.red.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+// MARK: - Replace recurring task
+
+/// Confirmation for replacing a recurring task. Unlike aliases, this rewrites
+/// titles on the user's real calendar events and cannot be undone, so the action
+/// is gated behind an explicit step that spells out its scope first.
+private struct ReplaceTaskSheet: View {
+    @ObservedObject var store: DashboardStore
+    let taskKey: String
+    /// When set, only this subtask's events are replaced.
+    let subtaskKey: String?
+    let currentTitle: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var newTitle = ""
+
+    private var canReplace: Bool {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && trimmed != currentTitle
+    }
+
+    /// Spells out the blast radius, which differs by scope: a task sweeps in its
+    /// subtasked events too, while a subtask touches only its own.
+    private var scopeExplanation: String {
+        let quoted = "\u{201C}\(currentTitle)\u{201D}"
+        let scope = subtaskKey == nil
+            ? "every future event under \(quoted), including its subtasks,"
+            : "every future event titled \(quoted)"
+        return "Replaces the title of \(scope) from today onward in your calendar. "
+            + "Past events are unchanged. This cannot be undone."
+    }
+
+    private func replace() {
+        guard canReplace else { return }
+        store.replaceRecurringTask(taskKey: taskKey,
+                                   subtaskKey: subtaskKey,
+                                   newTitle: newTitle)
+        dismiss()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(subtaskKey == nil ? "Replace Recurring Task"
+                                   : "Replace Recurring Subtask")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("New title").font(.caption).foregroundStyle(.secondary)
+                TextField("New title", text: $newTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(replace)
+            }
+
+            Text(scopeExplanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Replace", action: replace)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canReplace)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear { newTitle = currentTitle }
     }
 }
 

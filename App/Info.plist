@@ -21,8 +21,8 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Chronicle reads your calendar events to compute time-allocation metrics. Data stays on your Mac.</string>
+	<string>Chronicle reads your calendar events to compute time-allocation metrics, and updates event titles when you replace a task. Data stays on your Mac.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>Chronicle reads your calendar events to compute time-allocation metrics. Data stays on your Mac.</string>
+	<string>Chronicle reads your calendar events to compute time-allocation metrics, and updates event titles when you replace a task. Data stays on your Mac.</string>
 </dict>
 </plist>

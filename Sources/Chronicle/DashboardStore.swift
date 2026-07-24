@@ -63,6 +63,8 @@ final class DashboardStore: ObservableObject {
     @Published var totals: RangeTotals = .zero
     @Published var errorMessage: String?
     @Published var isRefreshing = false
+    /// True while a task replacement is being written to Calendar.
+    @Published var isReplacing = false
 
     /// Transient, non-persisted key of the segment currently emphasized by hover.
     /// A single shared value drives cross-highlighting across the chart, the
@@ -96,6 +98,10 @@ final class DashboardStore: ObservableObject {
     /// `calendar_key` form of whole-calendar-mode calendars (matches
     /// `daily_time.calendar_key`), passed to the bucketing to fold their tasks.
     private var wholeCalendarKeys: Set<String> = []
+
+    /// Task/Subtask separators mirrored from config. Used to rebuild a
+    /// event-style title (`Task - Subtask`) for the replacement sheet.
+    private var subtaskSeparators: [String] = [" - ", " | "]
 
     /// Weekday (Foundation numbering, 1 = Sunday … 7 = Saturday) at which the
     /// sidebar/legend tallies switch from the previous full week to the current
@@ -586,6 +592,53 @@ final class DashboardStore: ObservableObject {
         objectWillChange.send()
     }
 
+    // MARK: - Replace a recurring task
+
+    /// Replaces the title of every future Calendar event mapping to `taskKey`,
+    /// from the start of today onward, then re-extracts so the dashboard reflects
+    /// the change. Past events keep their old title, so the history stays intact
+    /// under its former name.
+    ///
+    /// Passing `subtaskKey` narrows the change to that one subtask, leaving the
+    /// task's other subtasks alone; omitting it replaces the whole task.
+    ///
+    /// Unlike aliases, this writes to the user's actual calendar and cannot be
+    /// undone, so it is only reached from an explicit confirmation in the UI.
+    func replaceRecurringTask(taskKey: String, subtaskKey: String? = nil, newTitle: String) {
+        let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, !isReplacing, !isRefreshing else { return }
+        isReplacing = true
+        errorMessage = nil
+        Task {
+            do {
+                let config = try ChronicleConfig.load()
+                let extractor = CalendarExtractor()
+                try await extractor.requestAccess()
+                let summary = try TaskReplacer().replace(targetTaskKey: taskKey,
+                                                         targetSubtaskKey: subtaskKey,
+                                                         newTitle: title,
+                                                         config: config)
+                await MainActor.run {
+                    self.isReplacing = false
+                    guard summary.totalReplaced > 0 else {
+                        self.errorMessage = summary.skippedReadOnly > 0
+                            ? "Nothing was replaced: the \(summary.skippedReadOnly) matching "
+                                + "future event(s) are on a calendar that doesn't allow edits."
+                            : "No future events matching this selection were found to replace."
+                        return
+                    }
+                    // Re-extract so the dashboard picks up the new title.
+                    self.refresh()
+                }
+            } catch {
+                await MainActor.run {
+                    self.isReplacing = false
+                    self.errorMessage = "\(error)"
+                }
+            }
+        }
+    }
+
     // MARK: - Selection
 
     /// A human-readable path for the current selection, derived from labels.
@@ -601,6 +654,21 @@ final class DashboardStore: ObservableObject {
             let sub = task?.subtasks.first { $0.key == subKey }
             return [task?.label, sub?.label].compactMap { $0 }.joined(separator: " / ")
         }
+    }
+
+    /// The current scope written the way a calendar event titles it — `Task` or
+    /// `Task - Subtask`, using the first configured separator. Seeds the
+    /// replacement sheet, where the value becomes a real event title (unlike
+    /// `currentTitle`, whose ` / ` join is display-only).
+    var currentEventTitle: String {
+        guard let taskKey = selection.taskKey else { return "" }
+        let task = taskList.first { $0.key == taskKey }
+        let taskLabel = task?.label ?? ""
+        guard let subKey = selection.subtaskKey,
+              let sub = task?.subtasks.first(where: { $0.key == subKey }) else {
+            return taskLabel
+        }
+        return taskLabel + (subtaskSeparators.first ?? " - ") + sub.label
     }
 
     func select(_ selection: HierarchySelection, nodeID: String) {
@@ -757,6 +825,7 @@ final class DashboardStore: ObservableObject {
             taskColors = config.taskColors
             aliasChains = config.aliasChains
             weeklyMetricsCutoff = config.weeklyMetricsCutoff
+            subtaskSeparators = config.subtaskSeparators
         }
     }
 
