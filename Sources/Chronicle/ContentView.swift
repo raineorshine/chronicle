@@ -479,18 +479,39 @@ private struct ReplaceTaskSheet: View {
 
     private var canReplace: Bool {
         let trimmed = newTitle.trimmingCharacters(in: .whitespaces)
+        // A known-empty count means there is nothing to rewrite. An unknown one
+        // (still counting, or the count failed) must not block the action.
         return !trimmed.isEmpty && trimmed != currentTitle
+            && store.replacementPreview?.totalReplaced != 0
     }
 
     /// Spells out the blast radius, which differs by scope: a task sweeps in its
-    /// subtasked events too, while a subtask touches only its own.
+    /// subtasked events too, while a subtask touches only its own. Once the count
+    /// arrives it replaces the vaguer wording with the number of events at stake,
+    /// where a recurring series counts once rather than once per occurrence.
     private var scopeExplanation: String {
-        let quoted = "\u{201C}\(currentTitle)\u{201D}"
-        let scope = subtaskKey == nil
-            ? "every future event under \(quoted), including its subtasks,"
-            : "every future event titled \(quoted)"
-        return "Replaces the title of \(scope) from today onward in your calendar. "
+        guard let preview = store.replacementPreview else {
+            let quoted = "\u{201C}\(currentTitle)\u{201D}"
+            let scope = subtaskKey == nil
+                ? "every future event under \(quoted), including its subtasks,"
+                : "every future event titled \(quoted)"
+            return "Replaces the title of \(scope) from today onward in your calendar. "
+                + "Past events are unchanged. This cannot be undone."
+        }
+        guard preview.totalReplaced > 0 else {
+            return "No future events match this selection."
+        }
+        let events = preview.totalReplaced == 1 ? "1 event" : "\(preview.totalReplaced) events"
+        return "Replaces \(events) from today onward in your calendar. "
             + "Past events are unchanged. This cannot be undone."
+    }
+
+    /// Matching events Chronicle cannot rewrite, e.g. on a subscribed calendar.
+    private var readOnlyNote: String? {
+        guard let skipped = store.replacementPreview?.skippedReadOnly, skipped > 0 else { return nil }
+        return skipped == 1
+            ? "1 more is on a read-only calendar and will be skipped."
+            : "\(skipped) more are on a read-only calendar and will be skipped."
     }
 
     private func replace() {
@@ -514,10 +535,15 @@ private struct ReplaceTaskSheet: View {
                     .onSubmit(replace)
             }
 
-            Text(scopeExplanation)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(scopeExplanation)
+                if let readOnlyNote {
+                    Text(readOnlyNote)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
 
             HStack {
                 Spacer()
@@ -530,7 +556,10 @@ private struct ReplaceTaskSheet: View {
         }
         .padding(20)
         .frame(width: 380)
-        .onAppear { newTitle = currentTitle }
+        .onAppear {
+            newTitle = currentTitle
+            store.loadReplacementPreview(taskKey: taskKey, subtaskKey: subtaskKey)
+        }
     }
 }
 

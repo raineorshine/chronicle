@@ -60,6 +60,8 @@ public struct ReplacementPlan: Equatable {
     public let ops: [ReplacementOp]
     /// Matching events on calendars that forbid edits (e.g. subscribed holiday
     /// calendars). Surfaced so the UI can explain why some events were untouched.
+    /// Counted per event like `ops`, so a read-only series counts once no matter
+    /// how many of its occurrences fall in the window.
     public let skippedReadOnly: Int
 
     public init(ops: [ReplacementOp], skippedReadOnly: Int) {
@@ -97,7 +99,9 @@ public enum TaskReplacementPlanner {
                             targetSubtaskKey: String? = nil,
                             separators: [String] = [" - ", " | "]) -> ReplacementPlan {
         var ops: [ReplacementOp] = []
-        var skippedReadOnly = 0
+        var skippedStandalone = 0
+        // Read-only recurring series, deduped so occurrences don't inflate the count.
+        var skippedSeries: Set<String> = []
         // Earliest matching occurrence per recurring series, keyed by identifier.
         var earliestBySeries: [String: (index: Int, start: Date)] = [:]
 
@@ -108,7 +112,11 @@ public enum TaskReplacementPlanner {
                   parsed.task.key == targetTaskKey else { continue }
             if let targetSubtaskKey, parsed.subtask?.key != targetSubtaskKey { continue }
             guard candidate.allowsModification else {
-                skippedReadOnly += 1
+                if candidate.isRecurring {
+                    skippedSeries.insert(candidate.occurrenceID)
+                } else {
+                    skippedStandalone += 1
+                }
                 continue
             }
 
@@ -131,11 +139,15 @@ public enum TaskReplacementPlanner {
         }
 
         ops.sort { $0.candidateIndex < $1.candidateIndex }
-        return ReplacementPlan(ops: ops, skippedReadOnly: skippedReadOnly)
+        return ReplacementPlan(ops: ops,
+                               skippedReadOnly: skippedStandalone + skippedSeries.count)
     }
 }
 
-/// What a replacement actually did, for user-facing feedback.
+/// What a replacement does, for user-facing feedback. Used both as a prediction
+/// — `TaskReplacer.preview` builds one from the plan before any write — and as
+/// the outcome `TaskReplacer.replace` reports afterwards. Every count is per
+/// event, so a recurring series counts once rather than once per occurrence.
 public struct ReplacementSummary: Equatable {
     /// Recurring series split at today and given the new title.
     public let replacedSeries: Int
@@ -148,6 +160,13 @@ public struct ReplacementSummary: Equatable {
         self.replacedSeries = replacedSeries
         self.replacedStandalone = replacedStandalone
         self.skippedReadOnly = skippedReadOnly
+    }
+
+    /// The effect `plan` would have if every write succeeded.
+    public init(plan: ReplacementPlan) {
+        self.init(replacedSeries: plan.ops.filter { $0.span == .futureEvents }.count,
+                  replacedStandalone: plan.ops.filter { $0.span == .thisEvent }.count,
+                  skippedReadOnly: plan.skippedReadOnly)
     }
 
     public var totalReplaced: Int { replacedSeries + replacedStandalone }
@@ -202,44 +221,13 @@ public final class TaskReplacer {
                         calendar: Calendar = .current) throws -> ReplacementSummary {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { throw ReplacementError.emptyTitle }
-        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
-            throw ReplacementError.accessDenied
-        }
 
-        let start = calendar.startOfDay(for: now)
-        let end = calendar.date(byAdding: .day, value: futureHorizonDays, to: start) ?? start
-
-        let all = store.calendars(for: .event)
-        let allow = Set(config.calendarAllowlist.map(Self.normalize))
-        let subtractive = Set(config.subtractiveCalendars.map(Self.normalize))
-        let included = all.filter {
-            let key = Self.normalize($0.title)
-            return allow.contains(key) || subtractive.contains(key)
-        }
-        guard !included.isEmpty else {
-            return ReplacementSummary(replacedSeries: 0, replacedStandalone: 0, skippedReadOnly: 0)
-        }
-
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: included)
-        let events = store.events(matching: predicate)
-
-        let candidates = events.enumerated().map { index, event in
-            let identifier = event.eventIdentifier ?? ""
-            return ReplacementCandidate(
-                // Fall back to a per-row identity so events without an identifier
-                // can never be collapsed into one another by the series dedupe.
-                occurrenceID: identifier.isEmpty ? "index:\(index)" : identifier,
-                rawTitle: event.title ?? "",
-                isAllDay: event.isAllDay,
-                isRecurring: event.hasRecurrenceRules,
-                allowsModification: event.calendar.allowsContentModifications,
-                occurrenceStart: event.startDate ?? .distantFuture)
-        }
-
-        let plan = TaskReplacementPlanner.plan(candidates: candidates,
-                                               targetTaskKey: targetTaskKey,
-                                               targetSubtaskKey: targetSubtaskKey,
-                                               separators: config.subtaskSeparators)
+        let (events, plan) = try planWrites(targetTaskKey: targetTaskKey,
+                                           targetSubtaskKey: targetSubtaskKey,
+                                           config: config,
+                                           futureHorizonDays: futureHorizonDays,
+                                           now: now,
+                                           calendar: calendar)
         guard !plan.ops.isEmpty else {
             return ReplacementSummary(replacedSeries: 0,
                                       replacedStandalone: 0,
@@ -272,6 +260,74 @@ public final class TaskReplacer {
         return ReplacementSummary(replacedSeries: replacedSeries,
                                   replacedStandalone: replacedStandalone,
                                   skippedReadOnly: plan.skippedReadOnly)
+    }
+
+    /// What `replace` would do for this scope, without touching the calendar.
+    /// Lets the UI state the blast radius — in events, not occurrences — before
+    /// the user commits to a change that cannot be undone.
+    public func preview(targetTaskKey: String,
+                        targetSubtaskKey: String? = nil,
+                        config: ChronicleConfig,
+                        futureHorizonDays: Int = TaskReplacer.defaultFutureHorizonDays,
+                        now: Date = Date(),
+                        calendar: Calendar = .current) throws -> ReplacementSummary {
+        let (_, plan) = try planWrites(targetTaskKey: targetTaskKey,
+                                       targetSubtaskKey: targetSubtaskKey,
+                                       config: config,
+                                       futureHorizonDays: futureHorizonDays,
+                                       now: now,
+                                       calendar: calendar)
+        return ReplacementSummary(plan: plan)
+    }
+
+    /// Queries the tracked calendars from the start of today and plans the writes
+    /// for `targetTaskKey`. Returns the queried events alongside the plan, whose
+    /// `candidateIndex` indexes into them.
+    private func planWrites(targetTaskKey: String,
+                            targetSubtaskKey: String?,
+                            config: ChronicleConfig,
+                            futureHorizonDays: Int,
+                            now: Date,
+                            calendar: Calendar) throws -> (events: [EKEvent], plan: ReplacementPlan) {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
+            throw ReplacementError.accessDenied
+        }
+
+        let start = calendar.startOfDay(for: now)
+        let end = calendar.date(byAdding: .day, value: futureHorizonDays, to: start) ?? start
+
+        let all = store.calendars(for: .event)
+        let allow = Set(config.calendarAllowlist.map(Self.normalize))
+        let subtractive = Set(config.subtractiveCalendars.map(Self.normalize))
+        let included = all.filter {
+            let key = Self.normalize($0.title)
+            return allow.contains(key) || subtractive.contains(key)
+        }
+        guard !included.isEmpty else {
+            return ([], ReplacementPlan(ops: [], skippedReadOnly: 0))
+        }
+
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: included)
+        let events = store.events(matching: predicate)
+
+        let candidates = events.enumerated().map { index, event in
+            let identifier = event.eventIdentifier ?? ""
+            return ReplacementCandidate(
+                // Fall back to a per-row identity so events without an identifier
+                // can never be collapsed into one another by the series dedupe.
+                occurrenceID: identifier.isEmpty ? "index:\(index)" : identifier,
+                rawTitle: event.title ?? "",
+                isAllDay: event.isAllDay,
+                isRecurring: event.hasRecurrenceRules,
+                allowsModification: event.calendar.allowsContentModifications,
+                occurrenceStart: event.startDate ?? .distantFuture)
+        }
+
+        let plan = TaskReplacementPlanner.plan(candidates: candidates,
+                                               targetTaskKey: targetTaskKey,
+                                               targetSubtaskKey: targetSubtaskKey,
+                                               separators: config.subtaskSeparators)
+        return (events, plan)
     }
 
     private static func normalize(_ s: String) -> String {

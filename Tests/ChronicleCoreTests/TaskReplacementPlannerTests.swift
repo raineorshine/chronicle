@@ -205,6 +205,22 @@ final class TaskReplacementPlannerTests: XCTestCase {
         XCTAssertEqual(plan.skippedReadOnly, 2)
     }
 
+    func testReadOnlySeriesCountsOnceNotPerOccurrence() {
+        // The skip count is reported to the user in events, like the write plan,
+        // so a read-only series must not inflate it by its occurrences.
+        let plan = TaskReplacementPlanner.plan(
+            candidates: [candidate("s", title: "Email", recurring: true, editable: false, start: day(0)),
+                         candidate("s", title: "Email", recurring: true, editable: false, start: day(1)),
+                         candidate("s", title: "Email", recurring: true, editable: false, start: day(2)),
+                         candidate("one", title: "Email", editable: false, start: day(3)),
+                         candidate("two", title: "Email", editable: false, start: day(4))],
+            targetTaskKey: "email")
+
+        XCTAssertTrue(plan.ops.isEmpty)
+        // One series plus two distinct one-offs.
+        XCTAssertEqual(plan.skippedReadOnly, 3)
+    }
+
     func testNonMatchingReadOnlyEventsAreNotCounted() {
         let plan = TaskReplacementPlanner.plan(
             candidates: [candidate("a", title: "Standup", editable: false)],
@@ -231,5 +247,38 @@ final class TaskReplacementPlannerTests: XCTestCase {
             separators: ["::"])
 
         XCTAssertEqual(matching.ops.map(\.occurrenceID), ["a"])
+    }
+
+    // MARK: - Summary from a plan
+
+    /// `TaskReplacer.preview` turns a plan into the numbers the Replace sheet
+    /// shows, so the derivation must count events: one per series, one per
+    /// one-off, never one per occurrence.
+    func testSummaryFromPlanCountsEventsNotOccurrences() {
+        let plan = TaskReplacementPlanner.plan(
+            candidates: [candidate("s1", title: "Email", recurring: true, start: day(0)),
+                         candidate("s1", title: "Email", recurring: true, start: day(1)),
+                         candidate("s2", title: "Email - Triage", recurring: true, start: day(0)),
+                         candidate("one", title: "Email", start: day(2)),
+                         candidate("ro", title: "Email", editable: false, start: day(3))],
+            targetTaskKey: "email")
+
+        let summary = ReplacementSummary(plan: plan)
+
+        XCTAssertEqual(summary.replacedSeries, 2)
+        XCTAssertEqual(summary.replacedStandalone, 1)
+        XCTAssertEqual(summary.skippedReadOnly, 1)
+        XCTAssertEqual(summary.totalReplaced, 3)
+    }
+
+    func testSummaryFromEmptyPlanIsZero() {
+        let plan = TaskReplacementPlanner.plan(
+            candidates: [candidate("a", title: "Standup")],
+            targetTaskKey: "email")
+
+        XCTAssertEqual(ReplacementSummary(plan: plan),
+                       ReplacementSummary(replacedSeries: 0,
+                                          replacedStandalone: 0,
+                                          skippedReadOnly: 0))
     }
 }

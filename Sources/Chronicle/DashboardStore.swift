@@ -65,6 +65,12 @@ final class DashboardStore: ObservableObject {
     @Published var isRefreshing = false
     /// True while a task replacement is being written to Calendar.
     @Published var isReplacing = false
+    /// Predicted effect of the replacement the sheet is currently offering, or
+    /// nil while it is being computed (or if it could not be determined).
+    @Published var replacementPreview: ReplacementSummary?
+    /// Identifies the in-flight preview request, so a slow one for a scope the
+    /// user has left cannot overwrite the current count.
+    private var replacementPreviewToken = 0
 
     /// Transient, non-persisted key of the segment currently emphasized by hover.
     /// A single shared value drives cross-highlighting across the chart, the
@@ -593,6 +599,31 @@ final class DashboardStore: ObservableObject {
     }
 
     // MARK: - Replace a recurring task
+
+    /// Counts the events a replacement of this scope would rewrite, so the sheet
+    /// can state the blast radius before the user commits to it.
+    ///
+    /// Failures leave `replacementPreview` nil rather than raising the error
+    /// banner: the count is advisory, and `replaceRecurringTask` reports the same
+    /// error properly if the user goes ahead anyway.
+    func loadReplacementPreview(taskKey: String, subtaskKey: String? = nil) {
+        replacementPreview = nil
+        replacementPreviewToken += 1
+        let token = replacementPreviewToken
+        Task {
+            let summary: ReplacementSummary? = await Task.detached {
+                guard let config = try? ChronicleConfig.load() else { return nil }
+                return try? TaskReplacer().preview(targetTaskKey: taskKey,
+                                                   targetSubtaskKey: subtaskKey,
+                                                   config: config)
+            }.value
+            await MainActor.run {
+                // Drop a result the sheet has already moved on from.
+                guard token == self.replacementPreviewToken else { return }
+                self.replacementPreview = summary
+            }
+        }
+    }
 
     /// Replaces the title of every future Calendar event mapping to `taskKey`,
     /// from the start of today onward, then re-extracts so the dashboard reflects
