@@ -42,9 +42,11 @@ private struct NavigationCommands: Commands {
 
             Divider()
 
-            Button("Previous Activity") { store.navigateSibling(-1) }
+            // Steps through the sidebar as drawn, including the subtasks of
+            // expanded activities.
+            Button("Previous Task") { store.navigateSibling(-1) }
                 .keyboardShortcut(.leftArrow, modifiers: .command)
-            Button("Next Activity") { store.navigateSibling(1) }
+            Button("Next Task") { store.navigateSibling(1) }
                 .keyboardShortcut(.rightArrow, modifiers: .command)
 
             Divider()

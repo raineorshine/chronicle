@@ -57,7 +57,7 @@ private struct TaskRow: View {
             if task.subtasks.isEmpty {
                 taskRow
             } else {
-                DisclosureGroup {
+                DisclosureGroup(isExpanded: store.expansionBinding(forTaskKey: task.key)) {
                     ForEach(task.subtasks) { sub in
                         let subID = "sub:\(task.key):\(sub.key)"
                         SelectableRow(title: sub.label,

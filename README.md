@@ -267,6 +267,11 @@ segments are not drillable. The back chevron in the header moves the scope up a
 level. **Refresh** re-extracts from your selected calendars (in-process) and
 reloads.
 
+**⌘→ / ⌘←** step the selection down and up the sidebar exactly as it is drawn:
+**All Tasks**, each activity, and the subtasks of any activity whose disclosure
+triangle is open — collapsed subtasks are skipped. Selecting a subtask another
+way (say from Search) opens its activity, so it joins the walk.
+
 The **Search** button in the toolbar (or ⌘F) finds an activity by name without
 scrolling the sidebar. It opens on the week's busiest activities; type any part of
 a name and the suggestions filter live, covering both activities and their

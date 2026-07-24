@@ -18,6 +18,11 @@ final class DashboardStore: ObservableObject {
     /// `NavigationSplitView` so menu commands can expand/collapse it.
     @Published var columnVisibility: NavigationSplitViewVisibility = .all
 
+    /// Keys of the sidebar activities whose subtask disclosure groups are open.
+    /// Held here rather than inside `DisclosureGroup` so ⌘←/⌘→ can tell which
+    /// subtask rows are actually on screen.
+    @Published var expandedTaskKeys: Set<String> = []
+
     /// Number of trailing weeks shown on the X axis (includes the current,
     /// in-progress week). One of `allowedWeekWindows`.
     @Published var weeksWindow: Int = 4
@@ -738,17 +743,46 @@ final class DashboardStore: ObservableObject {
     }
 
     func select(_ selection: HierarchySelection, nodeID: String) {
+        // Selecting a subtask (e.g. from search) opens its activity so the
+        // selected row is visible — and stays in the ⌘←/⌘→ walk.
+        if let taskKey = selection.taskKey, selection.subtaskKey != nil {
+            expandedTaskKeys.insert(taskKey)
+        }
         self.selection = selection
         self.selectedNodeID = nodeID
         reloadData()
     }
 
+    /// Binding for one activity's disclosure state, so `DisclosureGroup` reads
+    /// and writes the store's `expandedTaskKeys`.
+    func expansionBinding(forTaskKey key: String) -> Binding<Bool> {
+        Binding(get: { [weak self] in self?.expandedTaskKeys.contains(key) ?? false },
+                set: { [weak self] isExpanded in
+                    guard let self else { return }
+                    if isExpanded {
+                        self.expandedTaskKeys.insert(key)
+                    } else {
+                        self.expandedTaskKeys.remove(key)
+                    }
+                })
+    }
+
     // MARK: - Keyboard navigation
 
-    /// Ordered node IDs the ⌘←/⌘→ shortcuts step through: the "All Tasks" home
-    /// row followed by each top-level activity (subtasks are excluded).
-    private var navigableNodeIDs: [String] {
-        ["all"] + taskList.map { "task:\($0.key)" }
+    /// The sidebar rows the ⌘←/⌘→ shortcuts step through, top to bottom exactly
+    /// as drawn: the "All Tasks" home row, each activity, and the subtasks of
+    /// the activities whose disclosure group is open.
+    private var navigableRows: [(nodeID: String, selection: HierarchySelection)] {
+        var rows: [(String, HierarchySelection)] = [("all", .all)]
+        for task in taskList {
+            rows.append(("task:\(task.key)", HierarchySelection(taskKey: task.key)))
+            guard expandedTaskKeys.contains(task.key) else { continue }
+            for sub in task.subtasks {
+                rows.append(("sub:\(task.key):\(sub.key)",
+                             HierarchySelection(taskKey: task.key, subtaskKey: sub.key)))
+            }
+        }
+        return rows
     }
 
     /// Selects the "All Tasks" home scope (⌘0 / ⌘⇧H).
@@ -770,29 +804,25 @@ final class DashboardStore: ObservableObject {
         select(HierarchySelection(taskKey: task.key), nodeID: "task:\(task.key)")
     }
 
-    /// Moves the selection ±1 within `navigableNodeIDs`, clamped at the ends. If
-    /// the current selection isn't a navigable row (e.g. a subtask is selected),
-    /// it's treated as its parent activity so prev/next still behave intuitively.
+    /// Moves the selection ±1 within `navigableRows`, clamped at the ends. If the
+    /// current selection isn't on screen (a subtask of a collapsed activity), it's
+    /// treated as its parent activity so prev/next still behave intuitively.
     func navigateSibling(_ offset: Int) {
-        let ids = navigableNodeIDs
-        guard !ids.isEmpty else { return }
+        let rows = navigableRows
+        guard !rows.isEmpty else { return }
 
-        let currentID: String
-        if selectedNodeID.hasPrefix("sub:"), let taskKey = selection.taskKey {
+        var currentID = selectedNodeID
+        if !rows.contains(where: { $0.nodeID == currentID }),
+           selectedNodeID.hasPrefix("sub:"), let taskKey = selection.taskKey {
             currentID = "task:\(taskKey)"
-        } else {
-            currentID = selectedNodeID
         }
 
-        let current = ids.firstIndex(of: currentID) ?? 0
-        let target = min(max(current + offset, 0), ids.count - 1)
+        let current = rows.firstIndex { $0.nodeID == currentID } ?? 0
+        let target = min(max(current + offset, 0), rows.count - 1)
         guard target != current else { return }
 
-        if target == 0 {
-            selectHome()
-        } else {
-            selectActivity(target) // target maps 1-based onto taskList
-        }
+        let row = rows[target]
+        select(row.selection, nodeID: row.nodeID)
     }
 
     /// True when the chart segments each bar by activity (Task), i.e. the top
