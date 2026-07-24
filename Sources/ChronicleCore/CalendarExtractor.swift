@@ -74,14 +74,8 @@ public final class CalendarExtractor {
         let bounds = window.dateBounds(calendar: calendar)
 
         let all = store.calendars(for: .event)
-        let allow = Set(config.calendarAllowlist.map(Self.normalize))
-        let subtractive = Set(config.subtractiveCalendars.map(Self.normalize))
-        // Subtractive calendars are always extracted so they can subtract (and
-        // their own time counts), even when not explicitly in the allowlist.
-        let included = all.filter {
-            let key = Self.normalize($0.title)
-            return allow.contains(key) || subtractive.contains(key)
-        }
+        let subtractive = Set(config.subtractiveCalendars.map(CalendarSelection.normalize))
+        let included = CalendarSelection.included(from: all, config: config)
 
         var inputs: [EventInput] = []
         if !included.isEmpty {
@@ -93,7 +87,8 @@ public final class CalendarExtractor {
                 guard let start = event.startDate, let end = event.endDate else { continue }
                 guard let parsed = TitleParser.parse(event.title ?? "",
                                                      separators: config.subtaskSeparators) else { continue }
-                let isSubtractive = subtractive.contains(Self.normalize(event.calendar.title))
+                let isSubtractive = subtractive.contains(
+                    CalendarSelection.normalize(event.calendar.title))
                 inputs.append(EventInput(calendar: TitleParser.normalize(event.calendar.title),
                                          title: parsed,
                                          start: start,
@@ -113,10 +108,6 @@ public final class CalendarExtractor {
                                  rowCount: rows.count,
                                  firstDate: bounds.first,
                                  lastDate: bounds.last)
-    }
-
-    private static func normalize(_ s: String) -> String {
-        s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     /// Converts a calendar's `CGColor` to an `#RRGGBB` string for display.

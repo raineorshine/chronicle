@@ -441,6 +441,9 @@ private struct DashboardDetail: View {
                                        : "Subtask breakdown by week")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
+            SchedulePreviewView(preview: store.schedulePreview,
+                                color: store.taskColor(forKey: store.selection.taskKey ?? ""))
+                .padding(.leading, 14)
             WindowControls(store: store)
         }
     }

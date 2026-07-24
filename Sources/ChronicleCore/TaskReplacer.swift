@@ -296,13 +296,8 @@ public final class TaskReplacer {
         let start = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: futureHorizonDays, to: start) ?? start
 
-        let all = store.calendars(for: .event)
-        let allow = Set(config.calendarAllowlist.map(Self.normalize))
-        let subtractive = Set(config.subtractiveCalendars.map(Self.normalize))
-        let included = all.filter {
-            let key = Self.normalize($0.title)
-            return allow.contains(key) || subtractive.contains(key)
-        }
+        let included = CalendarSelection.included(from: store.calendars(for: .event),
+                                                  config: config)
         guard !included.isEmpty else {
             return ([], ReplacementPlan(ops: [], skippedReadOnly: 0))
         }
@@ -328,9 +323,5 @@ public final class TaskReplacer {
                                                targetSubtaskKey: targetSubtaskKey,
                                                separators: config.subtaskSeparators)
         return (events, plan)
-    }
-
-    private static func normalize(_ s: String) -> String {
-        s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }

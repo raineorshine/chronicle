@@ -83,6 +83,14 @@ final class DashboardStore: ObservableObject {
     /// missing).
     @Published private(set) var recurringIdentities: Set<TaskIdentity> = []
 
+    /// Upcoming occurrences of the selected task, drawn beside its name. Nil at
+    /// the "All Tasks" scope, without Calendar access, or when nothing is
+    /// scheduled — in all of which the preview simply isn't drawn.
+    @Published private(set) var schedulePreview: SchedulePreview?
+
+    /// The in-flight preview load, cancelled when the selection moves on.
+    private var schedulePreviewTask: Task<Void, Never>?
+
     /// Transient, non-persisted key of the segment currently emphasized by hover.
     /// A single shared value drives cross-highlighting across the chart, the
     /// legend, and the left sidebar (all keyed by the same normalized-title key).
@@ -222,6 +230,7 @@ final class DashboardStore: ObservableObject {
         // populate the picker without prompting.
         refreshCalendarAccessState()
         refreshRecurringTasks()
+        loadSchedulePreview()
     }
 
     /// Rescans upcoming events for the tasks and subtasks that recur, which
@@ -625,6 +634,37 @@ final class DashboardStore: ObservableObject {
         objectWillChange.send()
     }
 
+    // MARK: - Schedule preview
+
+    /// Reloads the compact schedule shown beside the task name. Clears the old
+    /// preview first so a stale one never lingers over a new selection, and
+    /// cancels any load still in flight so a slow query can't land after it.
+    ///
+    /// Failures are swallowed rather than surfaced: the preview is decoration,
+    /// and `errorMessage` renders as a red banner across the whole detail page.
+    func loadSchedulePreview() {
+        schedulePreviewTask?.cancel()
+        schedulePreview = nil
+        guard let taskKey = selection.taskKey else { return }
+        let subtaskKey = selection.subtaskKey
+        let calendar = calendar
+        schedulePreviewTask = Task { [weak self] in
+            let occurrences = await Task.detached(priority: .userInitiated) {
+                guard let config = try? ChronicleConfig.load() else { return [ScheduleOccurrence]() }
+                return ScheduleReader().occurrences(targetTaskKey: taskKey,
+                                                    targetSubtaskKey: subtaskKey,
+                                                    config: config,
+                                                    calendar: calendar)
+            }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.schedulePreview = SchedulePreviewBuilder.build(occurrences: occurrences,
+                                                                     now: Date(),
+                                                                     calendar: calendar)
+            }
+        }
+    }
+
     // MARK: - Replace a recurring task
 
     /// Counts the events a replacement of this scope would rewrite, so the sheet
@@ -773,6 +813,7 @@ final class DashboardStore: ObservableObject {
         self.selection = selection
         self.selectedNodeID = nodeID
         reloadData()
+        loadSchedulePreview()
     }
 
     /// Binding for one activity's disclosure state, so `DisclosureGroup` reads
