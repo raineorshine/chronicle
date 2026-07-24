@@ -351,6 +351,9 @@ private struct DashboardDetail: View {
         .frame(minWidth: 640, minHeight: 460, maxHeight: .infinity, alignment: .top)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                TaskSearchButton(store: store)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 CalendarPickerButton(store: store)
             }
             ToolbarItem(placement: .primaryAction) {
@@ -528,6 +531,149 @@ private struct ReplaceTaskSheet: View {
         .padding(20)
         .frame(width: 380)
         .onAppear { newTitle = currentTitle }
+    }
+}
+
+// MARK: - Task search
+
+private struct TaskSearchButton: View {
+    @ObservedObject var store: DashboardStore
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            Label("Search", systemImage: "magnifyingglass")
+        }
+        .help("Search activities by name (⌘F)")
+        .keyboardShortcut("f", modifiers: .command)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            TaskSearchPopover(store: store, isPresented: $isPresented)
+        }
+    }
+}
+
+/// Live autosuggest over the window's activities and their subtasks. ↑/↓ move
+/// the highlight and Enter (or a click) selects, landing on exactly the scope
+/// the matching sidebar row would.
+private struct TaskSearchPopover: View {
+    @ObservedObject var store: DashboardStore
+    @Binding var isPresented: Bool
+
+    @State private var query = ""
+    @State private var highlighted = 0
+    @FocusState private var focused: Bool
+
+    /// Matches for the typed query, or the busiest activities when nothing is
+    /// typed yet, so the popover always opens onto something selectable.
+    private var results: [TaskSearchResult] {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? TaskSearch.topActivities(in: store.taskList)
+            : TaskSearch.match(query, in: store.taskList)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TextField("Search activities", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .onSubmit { commit() }
+                .onKeyPress(.downArrow) { move(1) }
+                .onKeyPress(.upArrow) { move(-1) }
+                .onKeyPress(.escape) { isPresented = false; return .handled }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+            Divider()
+
+            if results.isEmpty {
+                hint("No matches.")
+                Spacer(minLength: 0)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
+                                row(result, index: index)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .onChange(of: highlighted) { _, index in
+                        guard results.indices.contains(index) else { return }
+                        proxy.scrollTo(results[index].id)
+                    }
+                }
+            }
+        }
+        // A fixed height, rather than one that hugs the results: an AppKit
+        // popover sizes its window from the content it is presented with and
+        // does not grow afterwards, so a list that appears as you type would be
+        // clipped to the height of the empty state.
+        .frame(width: 320, height: 300)
+        .onAppear { focused = true }
+        .onChange(of: query) { _, _ in highlighted = 0 }
+    }
+
+    private func row(_ result: TaskSearchResult, index: Int) -> some View {
+        Button {
+            commit(index)
+        } label: {
+            HStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(store.taskColor(forKey: result.taskKey))
+                    .frame(width: 11, height: 11)
+                Text(result.displayLabel)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(String(format: "%.1fh", result.hours))
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(index == highlighted ? Color.primary.opacity(0.08) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 6)
+        .id(result.id)
+        .onHover { hovering in
+            if hovering { highlighted = index }
+        }
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+    }
+
+    /// Moves the highlight, clamped to the ends of the list. Always `.handled`
+    /// so the arrow keys never fall through to the text field's own cursor
+    /// movement.
+    private func move(_ offset: Int) -> KeyPress.Result {
+        guard !results.isEmpty else { return .handled }
+        highlighted = min(max(highlighted + offset, 0), results.count - 1)
+        return .handled
+    }
+
+    private func commit(_ index: Int? = nil) {
+        let target = index ?? highlighted
+        guard results.indices.contains(target) else { return }
+        let result = results[target]
+        store.select(HierarchySelection(taskKey: result.taskKey,
+                                        subtaskKey: result.subtaskKey),
+                     nodeID: result.id)
+        query = ""
+        isPresented = false
     }
 }
 

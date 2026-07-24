@@ -267,6 +267,14 @@ segments are not drillable. The back chevron in the header moves the scope up a
 level. **Refresh** re-extracts from your selected calendars (in-process) and
 reloads.
 
+The **Search** button in the toolbar (or ⌘F) finds an activity by name without
+scrolling the sidebar. It opens on the week's busiest activities; type any part of
+a name and the suggestions filter live, covering both activities and their
+subtasks (shown as `Task / Subtask`, and also matchable together — `em code` finds
+`em / Code Reviews`). ↑/↓ move through the suggestions and **Enter** opens the
+highlighted one, landing on exactly the scope its sidebar row would. Only
+activities in the selected window are searchable.
+
 ## Trying it without Calendar access (demo data)
 
 To see the dashboard populated before wiring up real calendars, seed synthetic
