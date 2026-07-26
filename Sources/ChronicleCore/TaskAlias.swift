@@ -41,7 +41,7 @@ public enum AliasResolver {
     /// entries are skipped. If the same `from` identity appears in more than one
     /// chain, the later chain wins.
     public static func resolve(chains: [[String]],
-                               separators: [String] = [" - ", " | "]) -> [ResolvedAlias] {
+                               separators: [String] = [" - ", " | ", " / "]) -> [ResolvedAlias] {
         // Keyed by (fromTaskKey, fromSubtaskKey) so cross-chain duplicates
         // collapse deterministically (last chain wins) and ordering is stable.
         var order: [String] = []

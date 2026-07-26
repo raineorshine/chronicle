@@ -126,7 +126,7 @@ final class DashboardStore: ObservableObject {
 
     /// Task/Subtask separators mirrored from config. Used to rebuild a
     /// event-style title (`Task - Subtask`) for the replacement sheet.
-    private var subtaskSeparators: [String] = [" - ", " | "]
+    private var subtaskSeparators: [String] = [" - ", " | ", " / "]
 
     /// Weekday (Foundation numbering, 1 = Sunday … 7 = Saturday) at which the
     /// sidebar/legend tallies switch from the previous full week to the current
