@@ -77,13 +77,14 @@ final class SegmentQueryTests: XCTestCase {
         XCTAssertEqual(points.first?.segmentKey, "em")
     }
 
-    func testActivityCalendarDailySeriesGroupsByTaskAndCalendar() throws {
+    func testActivityCalendarDailySeriesGroupsByTaskCalendarAndSubtaskPresence() throws {
         let db = try makeDB()
         try db.replaceWindow(rows: [
             DailyRow(date: "2026-07-06", calendarKey: "work", calendarLabel: "Work",
                      calendarColor: "#111111", taskKey: "em", taskLabel: "⚙️ em",
                      subtaskKey: nil, subtaskLabel: nil, durationSeconds: 3600, occurrenceCount: 1),
-            // Same task+calendar, different subtask -> merged into one (task,calendar) row.
+            // Same task+calendar but a subtask -> a separate, structured row, so
+            // the bucketing can keep it out of a whole-calendar catch-all bucket.
             DailyRow(date: "2026-07-06", calendarKey: "work", calendarLabel: "Work",
                      calendarColor: "#111111", taskKey: "em", taskLabel: "⚙️ em",
                      subtaskKey: "accounting", subtaskLabel: "accounting",
@@ -96,13 +97,17 @@ final class SegmentQueryTests: XCTestCase {
 
         let points = try db.activityCalendarDailySeries(from: "2026-07-01", to: "2026-07-31")
 
-        let work = points.first { $0.calendarKey == "work" }
+        // (em, work, bare), (em, work, subtask), (em, personal, bare).
+        XCTAssertEqual(points.count, 3)
+        let workBare = points.first { $0.calendarKey == "work" && !$0.hasSubtask }
+        let workSub = points.first { $0.calendarKey == "work" && $0.hasSubtask }
         let personal = points.first { $0.calendarKey == "personal" }
-        XCTAssertEqual(points.count, 2) // (em, work) and (em, personal)
-        XCTAssertEqual(work?.hours ?? 0, 1.5, accuracy: 0.0001) // 1h + 0.5h subtasks merged
-        XCTAssertEqual(work?.calendarColorHex, "#111111")
-        XCTAssertEqual(work?.taskLabel, "⚙️ em")
+        XCTAssertEqual(workBare?.hours ?? 0, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(workSub?.hours ?? 0, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(workBare?.calendarColorHex, "#111111")
+        XCTAssertEqual(workBare?.taskLabel, "⚙️ em")
         XCTAssertEqual(personal?.hours ?? 0, 0.5, accuracy: 0.0001)
+        XCTAssertFalse(personal?.hasSubtask ?? true)
         XCTAssertEqual(personal?.calendarColorHex, "#222222")
     }
 
