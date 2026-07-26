@@ -3,6 +3,12 @@ import AppKit
 import Charts
 import ChronicleCore
 
+/// Replace the pasteboard contents with `string`.
+private func copyToPasteboard(_ string: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(string, forType: .string)
+}
+
 struct ContentView: View {
     @ObservedObject var store: DashboardStore
     @Environment(\.scenePhase) private var scenePhase
@@ -252,10 +258,7 @@ private struct TaskColorSwatch: View {
             PalettePicker(store: store, taskKey: taskKey)
         }
         .contextMenu {
-            Button("Copy task name") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(taskName, forType: .string)
-            }
+            Button("Copy task name") { copyToPasteboard(taskName) }
             Button("Reset to Auto Color") { store.setTaskColor(taskKey, nil) }
                 .disabled(store.taskColors[taskKey] == nil)
         }
@@ -419,6 +422,10 @@ private struct DashboardDetail: View {
                     .disabled(!showsBackButton)
                     .accessibilityHidden(!showsBackButton)
                     Text(selectionTitle).font(.title2).bold()
+                        .contentShape(Rectangle())
+                        .contextMenu {
+                            Button("Copy task name") { copyToPasteboard(selectionTitle) }
+                        }
                     if let scope = replaceableScope {
                         Button {
                             isShowingReplaceSheet = true
@@ -1318,6 +1325,9 @@ private struct SegmentLegend: View {
                         .fill(store.isHighlighted(style.key) ? Color.primary.opacity(0.08) : Color.clear)
                 )
                 .contentShape(Rectangle())
+                .contextMenu {
+                    Button("Copy task name") { copyToPasteboard(style.displayLabel) }
+                }
                 .onHover { hovering in
                     if hovering {
                         store.setHighlight(style.key)
