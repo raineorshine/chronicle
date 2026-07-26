@@ -39,6 +39,21 @@ final class NormalizationTests: XCTestCase {
         XCTAssertEqual(parsed?.subtask?.key, "code reviews")
     }
 
+    func testSlashSeparatorSplit() {
+        // "em / Code Reviews" -> task: em, subtask: Code Reviews
+        let parsed = TitleParser.parse("em / Code Reviews")
+        XCTAssertEqual(parsed?.task.label, "em")
+        XCTAssertEqual(parsed?.subtask?.label, "Code Reviews")
+        XCTAssertEqual(parsed?.subtask?.key, "code reviews")
+    }
+
+    func testSlashWithoutSpacesIsNotSplit() {
+        // No spaces around the slash -> not a separator, so paths stay intact.
+        let parsed = TitleParser.parse("a/b")
+        XCTAssertNil(parsed?.subtask)
+        XCTAssertEqual(parsed?.task.label, "a/b") // slash preserved in label
+    }
+
     func testLeftmostSeparatorWinsAcrossDelimiters() {
         // "a - b | c" -> split at the leftmost separator; the rest stays in the subtask.
         let parsed = TitleParser.parse("a - b | c")

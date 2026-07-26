@@ -42,7 +42,7 @@ public enum RecurringTaskScanner {
     /// Every task and subtask with at least one recurring occurrence among
     /// `occurrences`, which the caller is expected to have limited to the future.
     public static func identities(in occurrences: [UpcomingOccurrence],
-                                  separators: [String] = [" - ", " | "]) -> Set<TaskIdentity> {
+                                  separators: [String] = [" - ", " | ", " / "]) -> Set<TaskIdentity> {
         var identities: Set<TaskIdentity> = []
         for occurrence in occurrences {
             // All-day events are never extracted, so they never form a task.

@@ -7,8 +7,9 @@ public struct ChronicleConfig: Codable, Equatable {
     public var calendarAllowlist: [String]
 
     /// Substrings treated as Task/Subtask separators. A title is split on the
-    /// earliest (leftmost) occurrence of any of these. Defaults to `" - "` and
-    /// `" | "`; the surrounding spaces keep ordinary hyphenated words intact.
+    /// earliest (leftmost) occurrence of any of these. Defaults to `" - "`,
+    /// `" | "`, and `" / "`; the surrounding spaces keep ordinary hyphenated
+    /// words and paths like `a/b` intact.
     public var subtaskSeparators: [String]
 
     /// Calendar display names (as shown in Apple Calendar) treated as
@@ -52,7 +53,7 @@ public struct ChronicleConfig: Codable, Equatable {
     public var weeklyMetricsCutoff: Int
 
     public init(calendarAllowlist: [String] = [],
-                subtaskSeparators: [String] = [" - ", " | "],
+                subtaskSeparators: [String] = [" - ", " | ", " / "],
                 subtractiveCalendars: [String] = [],
                 wholeCalendarSegments: [String] = [],
                 windowPastDays: Int = 60,

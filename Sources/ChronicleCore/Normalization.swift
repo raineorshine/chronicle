@@ -22,7 +22,7 @@ public enum TitleParser {
 
     /// Parses a raw event title into a Task and optional Subtask.
     /// Returns `nil` when the title has no usable Task after normalization.
-    public static func parse(_ raw: String, separators: [String] = [" - ", " | "]) -> ParsedTitle? {
+    public static func parse(_ raw: String, separators: [String] = [" - ", " | ", " / "]) -> ParsedTitle? {
         let (taskPart, subtaskPart) = split(raw, separators: separators)
 
         let task = normalize(taskPart)

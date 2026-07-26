@@ -97,7 +97,7 @@ public enum TaskReplacementPlanner {
     public static func plan(candidates: [ReplacementCandidate],
                             targetTaskKey: String,
                             targetSubtaskKey: String? = nil,
-                            separators: [String] = [" - ", " | "]) -> ReplacementPlan {
+                            separators: [String] = [" - ", " | ", " / "]) -> ReplacementPlan {
         var ops: [ReplacementOp] = []
         var skippedStandalone = 0
         // Read-only recurring series, deduped so occurrences don't inflate the count.

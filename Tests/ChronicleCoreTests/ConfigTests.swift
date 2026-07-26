@@ -46,11 +46,11 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(decoded.subtaskSeparators, [" / "])
     }
 
-    func testMissingSeparatorDefaultsToHyphenAndPipe() throws {
+    func testMissingSeparatorDefaultsToHyphenPipeAndSlash() throws {
         let json = #"{"calendarAllowlist":["Work"]}"#
         let decoded = try JSONDecoder().decode(ChronicleConfig.self,
                                                from: Data(json.utf8))
-        XCTAssertEqual(decoded.subtaskSeparators, [" - ", " | "])
+        XCTAssertEqual(decoded.subtaskSeparators, [" - ", " | ", " / "])
     }
 
     func testRoundTripPreservesSeparatorList() throws {

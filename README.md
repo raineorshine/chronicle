@@ -99,7 +99,7 @@ Your choices are stored in a config file (you normally don't edit this by hand):
 ```json
 {
   "calendarAllowlist": ["Work", "Personal"],
-  "subtaskSeparators": [" - ", " | "],
+  "subtaskSeparators": [" - ", " | ", " / "],
   "subtractiveCalendars": ["Instagram"],
   "aliasChains": [["VP of Engineering", "em - Code Reviews"]],
   "windowPastDays": 60,
@@ -112,7 +112,7 @@ Your choices are stored in a config file (you normally don't edit this by hand):
   case-insensitively). Managed via the in-app **Calendars** picker; an empty
   list extracts nothing.
 - **subtaskSeparators** — substrings treated as Task/Subtask dividers; a title
-  is split on the leftmost occurrence of any of them (default `[" - ", " | "]`).
+  is split on the leftmost occurrence of any of them (default `[" - ", " | ", " / "]`).
 - **subtractiveCalendars** — calendar names (case-insensitive) treated as
   *subtractive*: their time is subtracted from overlapping events in other
   calendars, while their own time is still counted in full (see below). A
@@ -301,7 +301,7 @@ the demo rows are automatically replaced the first time you extract real data.
 
 ## How it works
 
-- **Parsing.** Titles are split on `" - "` or `" | "` into Task/Subtask, then each part is
+- **Parsing.** Titles are split on `" - "`, `" | "`, or `" / "` into Task/Subtask, then each part is
   NFC-normalized, with parenthesized metadata and bare `%n` tokens (e.g. `%2`) removed,
   whitespace-collapsed, and trimmed. Punctuation and emoji are preserved in the display
   **label**; the grouping **key** lowercases the label with emoji and punctuation removed.
