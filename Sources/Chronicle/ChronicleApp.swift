@@ -49,6 +49,17 @@ private struct NavigationCommands: Commands {
             Button("Next Task") { store.navigateSibling(1) }
                 .keyboardShortcut(.rightArrow, modifiers: .command)
 
+            // Prev/next-tab chords, so ⌘H and ⌘L on the physical keyboard navigate
+            // activities. Karabiner rewrites those two chords system-wide before any
+            // app sees them (⌘H -> ⌘⇧[, ⌘L -> ⌘⇧]), which is also what browsers use
+            // for previous/next tab -- so binding the chords here, rather than the
+            // letters, is what actually reaches the app.
+            // Second binding for the same action; a button takes one shortcut.
+            Button("Previous Activity (⌘⇧[)") { store.navigateSibling(-1) }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
+            Button("Next Activity (⌘⇧])") { store.navigateSibling(1) }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+
             Divider()
 
             // Cmd+(N+1) selects the Nth activity, so Cmd+2 -> activity 1 ... Cmd+9 -> activity 8.
