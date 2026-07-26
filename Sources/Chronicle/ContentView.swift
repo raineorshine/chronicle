@@ -1131,6 +1131,7 @@ private struct WeeklyChartCard: View {
     @ObservedObject var store: DashboardStore
     @State private var hovered: DashboardStore.HoveredSegment?
     @State private var hoverPoint: CGPoint = .zero
+    @State private var tooltipSize: CGSize = .zero
 
     var body: some View {
         Group {
@@ -1216,8 +1217,13 @@ private struct WeeklyChartCard: View {
                     if let seg = hovered {
                         tooltip(for: seg)
                             .fixedSize()
-                            .offset(x: min(max(hoverPoint.x - 70, 0), geo.size.width - 150),
-                                    y: min(max(hoverPoint.y - 44, 0), geo.size.height - 44))
+                            .background(GeometryReader { tip in
+                                Color.clear
+                                    .onAppear { tooltipSize = tip.size }
+                                    .onChange(of: tip.size) { tooltipSize = $0 }
+                            })
+                            .offset(x: min(max(hoverPoint.x - 70, 0), max(geo.size.width - tooltipSize.width, 0)),
+                                    y: min(max(hoverPoint.y - 44, 0), max(geo.size.height - tooltipSize.height, 0)))
                             .allowsHitTesting(false)
                     }
                 }
