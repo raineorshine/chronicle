@@ -17,10 +17,10 @@ final class WeeklyBucketingTests: XCTestCase {
 
     private func tcPoint(_ date: String, task: String, taskLabel: String,
                          cal: String, calLabel: String? = nil, color: String? = nil,
-                         hours: Double) -> TaskCalendarDailyPoint {
+                         hours: Double, hasSubtask: Bool = false) -> TaskCalendarDailyPoint {
         TaskCalendarDailyPoint(date: date, taskKey: task, taskLabel: taskLabel,
                                calendarKey: cal, calendarLabel: calLabel ?? cal.capitalized,
-                               calendarColorHex: color, hours: hours)
+                               calendarColorHex: color, hours: hours, hasSubtask: hasSubtask)
     }
 
     func testEmptyInputProducesEmptyStacks() {
@@ -147,6 +147,96 @@ final class WeeklyBucketingTests: XCTestCase {
         let stacks = WeeklyBucketing.bucketByCalendarSegmentMode(
             points, calendar: mondayCalendar(), wholeCalendarKeys: [])
         XCTAssertEqual(stacks.segments.map(\.key), ["reading"])
+    }
+
+    func testRecurringTaskBreaksOutOfWholeCalendarBucket() {
+        // "em" is recurring and spans a task-mode calendar ("work") and the
+        // whole-calendar catch-all ("personal"); its personal hours must merge
+        // into the em task segment, not fold into the calendar bucket. A genuine
+        // one-off ("errand") in the same calendar still folds.
+        let points = [
+            tcPoint("2026-07-06", task: "em", taskLabel: "em", cal: "work", hours: 17.25),
+            tcPoint("2026-07-06", task: "em", taskLabel: "em", cal: "personal",
+                    calLabel: "Personal", hours: 6),
+            tcPoint("2026-07-06", task: "errand", taskLabel: "Errand", cal: "personal",
+                    calLabel: "Personal", hours: 1),
+        ]
+        let stacks = WeeklyBucketing.bucketByCalendarSegmentMode(
+            points, calendar: mondayCalendar(),
+            wholeCalendarKeys: ["personal"], recurringTaskKeys: ["em"])
+
+        let calPersonal = WeeklyBucketing.calendarKeyPrefix + "personal"
+        XCTAssertEqual(stacks.segments.map(\.key), ["em", calPersonal])
+
+        func hours(_ key: String) -> Double {
+            stacks.points.first { $0.weekStart == "2026-07-06" && $0.segmentKey == key }?.hours ?? 0
+        }
+        XCTAssertEqual(hours("em"), 23.25, accuracy: 0.0001)   // merged across calendars
+        XCTAssertEqual(hours(calPersonal), 1, accuracy: 0.0001) // one-off only
+        XCTAssertFalse(stacks.segments.first { $0.key == "em" }?.isCalendarBucket ?? true)
+    }
+
+    func testStructuredSubtaskEventBreaksOutOfWholeCalendarBucket() {
+        // In a whole-calendar catch-all, a structured `Task - Subtask` event
+        // breaks out into its task even when the task isn't recurring; a genuine
+        // one-off of a *different* task still folds into the calendar bucket.
+        let points = [
+            tcPoint("2026-07-06", task: "home", taskLabel: "Home", cal: "personal",
+                    calLabel: "Personal", hours: 2, hasSubtask: true),
+            tcPoint("2026-07-06", task: "errand", taskLabel: "Errand", cal: "personal",
+                    calLabel: "Personal", hours: 1, hasSubtask: false),
+        ]
+        let stacks = WeeklyBucketing.bucketByCalendarSegmentMode(
+            points, calendar: mondayCalendar(), wholeCalendarKeys: ["personal"])
+
+        let calPersonal = WeeklyBucketing.calendarKeyPrefix + "personal"
+        XCTAssertEqual(stacks.segments.map(\.key), ["home", calPersonal])
+
+        func hours(_ key: String) -> Double {
+            stacks.points.first { $0.weekStart == "2026-07-06" && $0.segmentKey == key }?.hours ?? 0
+        }
+        XCTAssertEqual(hours("home"), 2, accuracy: 0.0001)
+        XCTAssertEqual(hours(calPersonal), 1, accuracy: 0.0001)
+    }
+
+    func testOneStructuredEventPullsBareSiblingsOutOfBucket() {
+        // A single `Garden - Weeding` event marks the whole "garden" task real,
+        // so the bare `Garden` one-off in the same catch-all breaks out too
+        // rather than folding away — the structured sibling influences the bare
+        // one. A truly unstructured task ("errand") still folds.
+        let points = [
+            tcPoint("2026-07-06", task: "garden", taskLabel: "Garden", cal: "personal",
+                    calLabel: "Personal", hours: 1, hasSubtask: false),  // bare one-off
+            tcPoint("2026-07-06", task: "garden", taskLabel: "Garden", cal: "personal",
+                    calLabel: "Personal", hours: 2, hasSubtask: true),   // Garden - Weeding
+            tcPoint("2026-07-06", task: "errand", taskLabel: "Errand", cal: "personal",
+                    calLabel: "Personal", hours: 1, hasSubtask: false),
+        ]
+        let stacks = WeeklyBucketing.bucketByCalendarSegmentMode(
+            points, calendar: mondayCalendar(), wholeCalendarKeys: ["personal"])
+
+        let calPersonal = WeeklyBucketing.calendarKeyPrefix + "personal"
+        XCTAssertEqual(stacks.segments.map(\.key), ["garden", calPersonal])
+
+        func hours(_ key: String) -> Double {
+            stacks.points.first { $0.weekStart == "2026-07-06" && $0.segmentKey == key }?.hours ?? 0
+        }
+        XCTAssertEqual(hours("garden"), 3, accuracy: 0.0001)      // 1h bare + 2h structured
+        XCTAssertEqual(hours(calPersonal), 1, accuracy: 0.0001)   // only the errand one-off
+    }
+
+    func testWholeCalendarWithOnlyRecurringTasksHasNoBucket() {
+        // If every task in a whole-calendar-mode calendar is recurring, nothing
+        // is left to fold, so no calendar-bucket segment is produced.
+        let points = [
+            tcPoint("2026-07-06", task: "em", taskLabel: "em", cal: "personal", hours: 6),
+            tcPoint("2026-07-06", task: "walk", taskLabel: "Walk", cal: "personal", hours: 2),
+        ]
+        let stacks = WeeklyBucketing.bucketByCalendarSegmentMode(
+            points, calendar: mondayCalendar(),
+            wholeCalendarKeys: ["personal"], recurringTaskKeys: ["em", "walk"])
+        XCTAssertEqual(stacks.segments.map(\.key), ["em", "walk"])
+        XCTAssertFalse(stacks.segments.contains { $0.isCalendarBucket })
     }
 
     func testTaskOrderingIsStableIgnoringHours() {

@@ -148,17 +148,27 @@ public enum WeeklyBucketing {
     }
 
     /// Top-level segmentation driven by per-calendar configuration. Calendars
-    /// whose `calendar_key` is in `wholeCalendarKeys` fold all of their tasks
+    /// whose `calendar_key` is in `wholeCalendarKeys` fold their *one-off* tasks
     /// into a single whole-calendar segment; every other calendar's events
     /// surface as individual task segments, merged by `task_key` across all
     /// task-mode calendars. There is no top-N cap and no "Other" bucket.
+    ///
+    /// A whole-calendar-mode calendar is meant as a catch-all for one-off events
+    /// that don't fit an existing task, so its whole-calendar segment holds only
+    /// the leftover, unstructured one-offs. Fitting an existing task is a
+    /// task-level property: a `task_key` breaks out into its own segment (merging
+    /// with the same task from task-mode calendars) — for *all* its events,
+    /// including bare one-offs — when it is in `recurringTaskKeys` or when any of
+    /// its events is structured (`hasSubtask`, from a `Task - Subtask` title).
+    ///
     /// Segments are ordered for week-to-week visual continuity: task segments
     /// first, alphabetically by `task_key`, then whole-calendar segments
     /// alphabetically by `calendar_key`. Week boundaries follow `calendar`'s
     /// `firstWeekday`. Kept free of SwiftUI so it is unit-testable.
     public static func bucketByCalendarSegmentMode(_ points: [TaskCalendarDailyPoint],
                                                    calendar: Calendar,
-                                                   wholeCalendarKeys: Set<String>) -> WeeklyStacks {
+                                                   wholeCalendarKeys: Set<String>,
+                                                   recurringTaskKeys: Set<String> = []) -> WeeklyStacks {
         guard !points.isEmpty else { return .empty }
         let formatter = DateAggregator.dateFormatter(calendar: calendar)
 
@@ -173,6 +183,13 @@ public enum WeeklyBucketing {
         var taskMeta: [String: Meta] = [:]       // key = task_key
         var calendarMeta: [String: Meta] = [:]   // key = calendarKeyPrefix + calendar_key
 
+        // Whether a `task_key` fits an existing task is a task-level property: a
+        // single structured (`Task - Subtask`) event marks the whole task real,
+        // so its bare one-offs break out too instead of folding into a catch-all.
+        let structuredTaskKeys = Set(points.lazy
+            .filter { $0.hours > 0 && $0.hasSubtask }
+            .map(\.taskKey))
+
         for p in points {
             guard p.hours > 0,
                   let date = formatter.date(from: p.date),
@@ -180,10 +197,17 @@ public enum WeeklyBucketing {
             let week = formatter.string(from: interval.start)
             weekStartSet.insert(week)
 
-            let isWhole = wholeCalendarKeys.contains(p.calendarKey)
-            let key = isWhole ? calendarKeyPrefix + p.calendarKey : p.taskKey
+            // Only a whole-calendar calendar's genuinely unstructured one-offs
+            // fold into its catch-all segment. Every event of a task breaks out
+            // into that task's segment once the task fits an existing task —
+            // either it recurs, or any of its events is structured
+            // (`Task - Subtask`) — even this event's bare siblings.
+            let fitsExistingTask = recurringTaskKeys.contains(p.taskKey)
+                || structuredTaskKeys.contains(p.taskKey)
+            let foldsIntoCalendar = wholeCalendarKeys.contains(p.calendarKey) && !fitsExistingTask
+            let key = foldsIntoCalendar ? calendarKeyPrefix + p.calendarKey : p.taskKey
 
-            if isWhole {
+            if foldsIntoCalendar {
                 if calendarMeta[key] == nil || p.date >= calendarMeta[key]!.date {
                     calendarMeta[key] = Meta(label: p.calendarLabel, date: p.date,
                                              color: p.calendarColorHex)

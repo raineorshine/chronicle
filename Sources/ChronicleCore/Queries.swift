@@ -93,6 +93,10 @@ public struct TaskCalendarDailyPoint: Equatable {
     public let calendarLabel: String
     public let calendarColorHex: String?
     public let hours: Double
+    /// True when this cell's events carried a subtask (`Task - Subtask` title).
+    /// Such structured events break out into their task rather than folding into
+    /// a whole-calendar catch-all segment.
+    public let hasSubtask: Bool
 
     public init(date: String,
                 taskKey: String,
@@ -100,7 +104,8 @@ public struct TaskCalendarDailyPoint: Equatable {
                 calendarKey: String,
                 calendarLabel: String,
                 calendarColorHex: String?,
-                hours: Double) {
+                hours: Double,
+                hasSubtask: Bool = false) {
         self.date = date
         self.taskKey = taskKey
         self.taskLabel = taskLabel
@@ -108,6 +113,7 @@ public struct TaskCalendarDailyPoint: Equatable {
         self.calendarLabel = calendarLabel
         self.calendarColorHex = calendarColorHex
         self.hours = hours
+        self.hasSubtask = hasSubtask
     }
 }
 
@@ -345,12 +351,16 @@ extension Database {
     /// needs each task's source calendar (unlike `segmentDailySeries`).
     public func activityCalendarDailySeries(from: String,
                                             to: String) throws -> [TaskCalendarDailyPoint] {
+        // Split each (date, task, calendar) cell by whether its events carried a
+        // subtask, so the bucketing can keep structured `Task - Subtask` events
+        // out of a whole-calendar catch-all bucket.
         let sql = """
         SELECT date, task_key, MAX(task_label), calendar_key,
-               MAX(calendar_label), MAX(calendar_color), SUM(duration_seconds)
+               MAX(calendar_label), MAX(calendar_color), SUM(duration_seconds),
+               subtask_key IS NOT NULL AS has_subtask
         FROM canonical_time
         WHERE date >= ? AND date <= ?
-        GROUP BY date, task_key, calendar_key
+        GROUP BY date, task_key, calendar_key, has_subtask
         ORDER BY date;
         """
         let stmt = try prepare(sql)
@@ -367,13 +377,15 @@ extension Database {
             let calLabel = columnText(stmt, 4) ?? calKey
             let color = columnText(stmt, 5)
             let seconds = sqlite3_column_int64(stmt, 6)
+            let hasSubtask = sqlite3_column_int64(stmt, 7) != 0
             points.append(TaskCalendarDailyPoint(date: date,
                                                  taskKey: taskKey,
                                                  taskLabel: taskLabel,
                                                  calendarKey: calKey,
                                                  calendarLabel: calLabel,
                                                  calendarColorHex: color,
-                                                 hours: Double(seconds) / 3600.0))
+                                                 hours: Double(seconds) / 3600.0,
+                                                 hasSubtask: hasSubtask))
         }
         return points
     }

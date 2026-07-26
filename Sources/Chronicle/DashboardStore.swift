@@ -247,12 +247,18 @@ final class DashboardStore: ObservableObject {
             await MainActor.run {
                 // The sidebar lists canonical keys, so a series still titled
                 // with a pre-rename name marks the scope it merges into.
-                self.recurringIdentities = Set(identities.map {
+                let updated = Set(identities.map {
                     let canonical = self.canonicalIdentity(taskKey: $0.taskKey,
                                                            subtaskKey: $0.subtaskKey)
                     return TaskIdentity(taskKey: canonical.taskKey,
                                         subtaskKey: canonical.subtaskKey)
                 })
+                let changed = updated != self.recurringIdentities
+                self.recurringIdentities = updated
+                // The scan lands after the first render, so re-bucket the chart:
+                // recurring tasks must break out of whole-calendar catch-all
+                // segments, which the initial (empty) set couldn't do.
+                if changed { self.reloadData() }
             }
         }
     }
@@ -261,6 +267,13 @@ final class DashboardStore: ObservableObject {
     /// has a recurring event scheduled ahead of now.
     func isRecurring(taskKey key: String, subtaskKey: String? = nil) -> Bool {
         recurringIdentities.contains(TaskIdentity(taskKey: key, subtaskKey: subtaskKey))
+    }
+
+    /// `task_key`s of tasks with a recurring series scheduled ahead. Keeps
+    /// recurring tasks out of a whole-calendar catch-all segment so their hours
+    /// stay attributed to the task (see `bucketByCalendarSegmentMode`).
+    private var recurringTaskKeys: Set<String> {
+        Set(recurringIdentities.map(\.taskKey))
     }
 
     func reloadData() {
@@ -281,7 +294,8 @@ final class DashboardStore: ObservableObject {
             // (no top-N, no "Other").
             let daily = try db.activityCalendarDailySeries(from: bounds.from, to: bounds.to)
             stacks = WeeklyBucketing.bucketByCalendarSegmentMode(
-                daily, calendar: calendar, wholeCalendarKeys: wholeCalendarKeys)
+                daily, calendar: calendar, wholeCalendarKeys: wholeCalendarKeys,
+                recurringTaskKeys: recurringTaskKeys)
         } else {
             let daily = try db.segmentDailySeries(selection: plan.scope,
                                                   dimension: plan.dimension,
