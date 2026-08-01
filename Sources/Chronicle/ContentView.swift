@@ -370,6 +370,7 @@ private struct DashboardDetail: View {
             if let message = store.errorMessage {
                 errorBanner(message)
             }
+            SummaryCard(store: store)
             WeeklyChartCard(store: store)
                 .frame(maxHeight: .infinity)
         }
@@ -1334,6 +1335,155 @@ private struct WeeksPopUpButton: NSViewRepresentable {
             onSelect(options[index])
         }
     }
+}
+
+// MARK: - Summary
+
+/// The headline numbers for the current scope, above the chart: what took the
+/// most time across the charted window, and what moved most from the previous
+/// week into the metrics week (the same week the sidebar tallies).
+///
+/// Both lists are ranked off the very stacks the chart draws, so the summary can
+/// never disagree with the picture beneath it. Nothing is drawn when there is
+/// nothing to summarize, leaving the chart's own empty state to speak.
+private struct SummaryCard: View {
+    @ObservedObject var store: DashboardStore
+
+    var body: some View {
+        let top = store.topSegments
+        let movers = store.topMovers
+        if top.isEmpty {
+            EmptyView()
+        } else {
+            HStack(alignment: .top, spacing: 24) {
+                column(store.isTaskLevel ? "Top tasks" : "Top subtasks",
+                       help: "Total hours over the \(store.weeksWindow) weeks charted below") {
+                    ForEach(top) { entry in
+                        row(segmentKey: entry.segmentKey) {
+                            Text(Self.hours(entry.hours))
+                        }
+                    }
+                }
+                column("Top movers", help: "Change from \(store.moverComparisonDescription)") {
+                    if movers.isEmpty {
+                        Text("No change from the previous week.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 4)
+                    } else {
+                        ForEach(movers) { mover in
+                            row(segmentKey: mover.segmentKey) {
+                                HStack(spacing: 5) {
+                                    Text(Self.change(mover))
+                                    // The percentage hangs off the right in a
+                                    // column of its own, so the before/after
+                                    // values still line up on a mover that rose
+                                    // out of zero and has no percentage to show.
+                                    Text(Self.percent(mover) ?? "")
+                                        .foregroundStyle(Self.percentColor(mover))
+                                        .lineLimit(1)
+                                        .frame(width: Self.percentColumnWidth,
+                                               alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func column<Content: View>(_ title: String,
+                                       help: String,
+                                       @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption).bold()
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .padding(.bottom, 2)
+                .help(help)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One list row: the segment's chart color and name on the left, its numbers
+    /// on the right. Hovering cross-lights the same segment in the chart and the
+    /// sidebar, the way every other surface does.
+    private func row<Trailing: View>(segmentKey key: String,
+                                     @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(store.color(forSegment: key))
+                .frame(width: 11, height: 11)
+            Text(store.displayLabel(forSegment: key))
+                .font(.caption)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            trailing()
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(store.isHighlighted(key) ? Color.primary.opacity(0.08) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Copy task name") { copyToPasteboard(store.displayLabel(forSegment: key)) }
+        }
+        .onHover { hovering in
+            if hovering {
+                store.setHighlight(key)
+            } else if store.highlightedSegmentKey == key {
+                store.setHighlight(nil)
+            }
+        }
+    }
+
+    /// Hours to one decimal, dropping a zero tenth so a round number reads as
+    /// "10" rather than "10.0".
+    private static func hoursValue(_ hours: Double) -> String {
+        let rounded = (hours * 10).rounded() / 10
+        return rounded == rounded.rounded() ? String(format: "%.0f", rounded)
+                                            : String(format: "%.1f", rounded)
+    }
+
+    private static func hours(_ hours: Double) -> String {
+        "\(hoursValue(hours)) hrs"
+    }
+
+    /// A mover's before and after, e.g. "10 → 12 hrs" — only the destination
+    /// carries the unit, since both sides share it.
+    private static func change(_ mover: MoverEntry) -> String {
+        "\(hoursValue(mover.previousHours)) → \(hours(mover.currentHours))"
+    }
+
+    /// The change as a percentage, e.g. "+20%". Nil for a segment that rose out
+    /// of zero: it moved, but not by any finite percentage.
+    private static func percent(_ mover: MoverEntry) -> String? {
+        guard let change = mover.percentChange else { return nil }
+        let magnitude = String(format: "%.0f", abs(change))
+        return "\(change < 0 ? "−" : "+")\(magnitude)%"
+    }
+
+    /// Green for more time, red for less. Uses the system colors rather than the
+    /// task palette so the direction reads as a signal, not as an identity, and
+    /// still adapts to the viewer's appearance and accessibility settings.
+    private static func percentColor(_ mover: MoverEntry) -> Color {
+        mover.delta < 0 ? .red : .green
+    }
+
+    /// Reserved width of the hanging percentage column, sized to hold a
+    /// five-character change ("+220%") at caption size.
+    private static let percentColumnWidth: CGFloat = 42
 }
 
 // MARK: - Weekly stacked chart
