@@ -398,6 +398,40 @@ final class DashboardStore: ObservableObject {
         taskList.reduce(0) { $0 + $1.hours }
     }
 
+    /// `yyyy-MM-dd` of the week before the metrics week — the baseline the
+    /// summary's movers are measured against.
+    var previousMetricsWeekStart: String {
+        let f = formatter()
+        guard let start = f.date(from: metricsWeekStart),
+              let previous = calendar.date(byAdding: .weekOfYear, value: -1, to: start)
+        else { return "" }
+        return f.string(from: previous)
+    }
+
+    /// The busiest segments of the current scope over the charted window, for the
+    /// summary above the chart.
+    var topSegments: [SummaryEntry] {
+        DetailSummary.topByHours(stacks)
+    }
+
+    /// The segments of the current scope that moved most from the previous week
+    /// into the metrics week — the same week the sidebar tallies.
+    var topMovers: [MoverEntry] {
+        DetailSummary.topMovers(stacks,
+                                previousWeek: previousMetricsWeekStart,
+                                currentWeek: metricsWeekStart)
+    }
+
+    /// The two weeks the movers list compares, e.g. "Jul 20–26 → Jul 27–Aug 2".
+    /// Spelled out in the summary's tooltip, because the arrow alone doesn't say
+    /// which weeks are on either side of it.
+    var moverComparisonDescription: String {
+        let f = formatter()
+        guard let previous = f.date(from: previousMetricsWeekStart),
+              let current = f.date(from: metricsWeekStart) else { return "" }
+        return "\(weekLabelRange(date: previous)) → \(weekLabelRange(date: current))"
+    }
+
     /// Total hours per week, ascending by week start.
     var weekTotals: [(weekStart: String, hours: Double)] {
         var byWeek: [String: Double] = [:]
