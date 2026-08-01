@@ -399,19 +399,6 @@ final class DashboardStore: ObservableObject {
         taskList.reduce(0) { $0 + $1.hours }
     }
 
-    /// Hours in the metrics week per segment key. Derived from the already-
-    /// bucketed `stacks.points`, matching the "metrics week" definition used for
-    /// the sidebar tallies (`metricsWeekStart`). Segments absent from the metrics
-    /// week are simply missing (callers treat that as zero).
-    var metricsWeekHoursBySegment: [String: Double] {
-        let week = metricsWeekStart
-        var byKey: [String: Double] = [:]
-        for p in stacks.points where p.weekStart == week {
-            byKey[p.segmentKey, default: 0] += p.hours
-        }
-        return byKey
-    }
-
     /// Total hours per week, ascending by week start.
     var weekTotals: [(weekStart: String, hours: Double)] {
         var byWeek: [String: Double] = [:]
@@ -916,16 +903,6 @@ final class DashboardStore: ObservableObject {
         } else {
             select(HierarchySelection(taskKey: key), nodeID: "task:\(key)")
         }
-    }
-
-    /// Drills into an activity segment so the chart re-stacks it by subtask.
-    /// No-op for the "Other" bucket, per-calendar buckets, or when already at
-    /// subtask level. The segment key is the (calendar-agnostic) task key.
-    func drillInto(segmentKey key: String) {
-        guard isTaskLevel,
-              key != WeeklyBucketing.otherKey,
-              !WeeklyBucketing.isCalendarBucketKey(key) else { return }
-        select(HierarchySelection(taskKey: key), nodeID: "task:\(key)")
     }
 
     /// Moves the scope up one level (subtask → task → all).
