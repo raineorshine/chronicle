@@ -1145,14 +1145,8 @@ private struct WeeklyChartCard: View {
             if store.stacks.points.isEmpty {
                 emptyState
             } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    chart
-                    ScrollView {
-                        SegmentLegend(store: store)
-                    }
-                    .frame(maxHeight: .infinity)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                chart
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .padding(16)
@@ -1164,7 +1158,7 @@ private struct WeeklyChartCard: View {
         GeometryReader { geo in
             chartBody(width: geo.size.width)
         }
-        .frame(height: 300)
+        .frame(minHeight: 300, maxHeight: .infinity)
     }
 
     private func chartBody(width: CGFloat) -> some View {
@@ -1348,69 +1342,5 @@ private struct WeeklyChartCard: View {
                 .font(.caption).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, minHeight: 300)
-    }
-}
-
-/// A tappable legend. At the activity level, clicking a task segment drills
-/// into its subtasks; whole-calendar segments and the subtask level are
-/// non-interactive.
-private struct SegmentLegend: View {
-    @ObservedObject var store: DashboardStore
-
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .leading)]
-
-    var body: some View {
-        let weekHours = store.metricsWeekHoursBySegment
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
-            ForEach(store.segmentStyles) { style in
-                let isCalendarBucket = WeeklyBucketing.isCalendarBucketKey(style.key)
-                let isTask = store.isTaskLevel
-                    && style.key != WeeklyBucketing.otherKey
-                    && !isCalendarBucket
-                let drillable = isTask
-                HStack(spacing: 6) {
-                    if isTask {
-                        TaskColorSwatch(store: store, taskKey: style.key, taskName: style.displayLabel, size: 11)
-                    } else {
-                        RoundedRectangle(cornerRadius: 2).fill(style.color)
-                            .frame(width: 11, height: 11)
-                    }
-                    Button {
-                        store.drillInto(segmentKey: style.key)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(style.displayLabel).font(.caption).lineLimit(1)
-                            Spacer(minLength: 4)
-                            Text(String(format: "%.1fh", weekHours[style.key] ?? 0))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!drillable)
-                    .help(drillable ? "Break \(style.displayLabel) down by subtask"
-                          : isCalendarBucket ? "\(style.displayLabel) (whole calendar)" : "")
-                }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(store.isHighlighted(style.key) ? Color.primary.opacity(0.08) : Color.clear)
-                )
-                .contentShape(Rectangle())
-                .contextMenu {
-                    Button("Copy task name") { copyToPasteboard(style.displayLabel) }
-                }
-                .onHover { hovering in
-                    if hovering {
-                        store.setHighlight(style.key)
-                    } else if store.highlightedSegmentKey == style.key {
-                        store.setHighlight(nil)
-                    }
-                }
-            }
-        }
     }
 }
