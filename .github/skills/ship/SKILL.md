@@ -41,11 +41,23 @@ If the rebase hits conflicts: resolve them (prefer the branch changes unless cle
 
 ### 4. Squash all commits into one
 
+First check how many commits the branch has:
+
 ```bash
-git reset --soft main && git commit -m "subject" -m "body"
+git rev-list --count main..HEAD
+```
+
+If it prints `1`, the branch is already a single commit — **skip this step entirely** and go to step 5.
+
+Otherwise squash by resetting to the **merge base**, not to `main`:
+
+```bash
+BASE=$(git merge-base HEAD main) && git reset --soft "$BASE" && git commit -m "subject" -m "body"
 ```
 
 Use a single message that describes the overall diff.
+
+**Never use `git reset --soft main` here.** With parallel worktrees, `main` can advance between step 3 and this step. `reset --soft main` would re-parent this branch's tree onto the new tip without replaying anything, silently reverting whatever the other worktree just landed. The merge base is a fixed ancestor of `HEAD`, so resetting to it only ever collapses this branch's own commits; if `main` has moved, step 5's `--ff-only` fails and the recovery loop replays the commit properly.
 
 ### 5. Fast-forward merge into main
 
@@ -58,7 +70,7 @@ BRANCH=$(git branch --show-current) && MAIN=$(git worktree list | head -1 | awk 
 **If `--ff-only` fails with "Not possible to fast-forward":** another worktree merged into `main` in the meantime, so this branch is no longer a direct descendant. This is expected when running parallel worktree sessions and is safe — nothing was merged or lost. Recover by re-integrating on the new `main`:
 
 1. Go back to **step 3** (`git rebase main`) — this replays this branch's single squashed commit onto the updated `main`, surfacing any genuine conflict with the work that landed first. Resolve conflicts the same way.
-2. Redo **step 4** (`git reset --soft main && git commit`) to re-squash onto the new base.
+2. Redo **step 4** — after the rebase the branch is usually already one commit, so this is normally a no-op.
 3. Retry **step 5**.
 
 Repeat until the fast-forward succeeds. Because `main`'s ref only advances via this atomic `--ff-only` step, at most one worktree wins each round and the others simply rebase and retry — no merge commits, no clobbering.
