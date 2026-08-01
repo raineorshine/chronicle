@@ -22,6 +22,11 @@ struct ContentView: View {
             DashboardDetail(store: store)
         }
         .onAppear { store.load() }
+        // One sheet for every surface that can start a rename, so a row doesn't
+        // have to own presentation state that dies with it when the list reloads.
+        .sheet(item: $store.renameTarget) { target in
+            RenameTaskSheet(store: store, target: target)
+        }
         .onChange(of: scenePhase) { _, phase in
             // Re-check when returning to the app (e.g. after granting access in
             // System Settings) so the picker refreshes without a restart.
@@ -48,6 +53,26 @@ private struct HierarchySidebar: View {
             }
         }
         .listStyle(.sidebar)
+    }
+}
+
+/// The context-menu items every sidebar row offers for the activity (or
+/// subtask) it names. Held in one place so the row and the color swatch nested
+/// inside it — whose own menu shadows the row's — stay in step.
+private struct TaskMenuItems: View {
+    @ObservedObject var store: DashboardStore
+    let taskKey: String
+    var subtaskKey: String? = nil
+    /// The row's visible name, which "Copy task name" copies verbatim.
+    let displayName: String
+
+    var body: some View {
+        Button("Copy task name") { copyToPasteboard(displayName) }
+        Button(subtaskKey == nil ? "Rename task…" : "Rename subtask…") {
+            store.beginRename(taskKey: taskKey, subtaskKey: subtaskKey)
+        }
+        .disabled(store.isRenaming || store.isRefreshing)
+        CategorizeMenu(store: store, taskKey: taskKey, subtaskKey: subtaskKey)
     }
 }
 
@@ -87,10 +112,10 @@ private struct TaskRow: View {
                                          nodeID: subID)
                         }
                         .contextMenu {
-                            Button("Copy task name") { copyToPasteboard(sub.label) }
-                            CategorizeMenu(store: store,
-                                           taskKey: task.key,
-                                           subtaskKey: sub.key)
+                            TaskMenuItems(store: store,
+                                          taskKey: task.key,
+                                          subtaskKey: sub.key,
+                                          displayName: sub.label)
                         }
                     }
                 } label: { taskRow }
@@ -128,8 +153,7 @@ private struct TaskRow: View {
                       && store.selectedNodeID != nodeID)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Copy task name") { copyToPasteboard(task.label) }
-            CategorizeMenu(store: store, taskKey: task.key, subtaskKey: nil)
+            TaskMenuItems(store: store, taskKey: task.key, displayName: task.label)
         }
         .onHover { hovering in
             if hovering {
@@ -310,7 +334,7 @@ private struct TaskColorSwatch: View {
             PalettePicker(store: store, taskKey: taskKey)
         }
         .contextMenu {
-            Button("Copy task name") { copyToPasteboard(taskName) }
+            TaskMenuItems(store: store, taskKey: taskKey, displayName: taskName)
             Button("Reset to Auto Color") { store.setTaskColor(taskKey, nil) }
                 .disabled(store.taskColors[taskKey] == nil)
         }
@@ -649,6 +673,151 @@ private struct ReplaceTaskSheet: View {
         .onAppear {
             newTitle = currentTitle
             store.loadReplacementPreview(taskKey: taskKey, subtaskKey: subtaskKey)
+        }
+    }
+}
+
+// MARK: - Rename a task
+
+/// Confirmation for renaming a task outright. Sits between the app's two other
+/// rename-shaped tools: an alias only merges titles at read time and leaves the
+/// calendar alone, while a replacement rewrites from today onward and splits a
+/// recurring series there, deliberately leaving history under the old name. This
+/// renames the events themselves, past ones included, and keeps a recurring
+/// series whole — so the activity simply carries its new name throughout.
+///
+/// Like a replacement it cannot be undone, so it is gated behind an explicit
+/// step that spells out its scope first.
+private struct RenameTaskSheet: View {
+    @ObservedObject var store: DashboardStore
+    let target: RenameTarget
+    @Environment(\.dismiss) private var dismiss
+    @State private var newTitle = ""
+
+    /// Height held for the explanation from the moment the sheet opens, so the
+    /// count fading in doesn't resize the sheet under the pointer.
+    ///
+    /// Two lines of caption text (14.4pt each at this sheet's 340pt text width),
+    /// which is what all but the wordiest breakdown comes to. A longer sentence,
+    /// or a read-only note underneath, grows the sheet — worth it to keep the
+    /// reserved space from dwarfing the common case.
+    private static let explanationHeight: CGFloat = 29
+
+    private var canRename: Bool {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespaces)
+        // A known-empty count means there is nothing to rewrite. An unknown one
+        // (still counting, or the count unavailable) must not block the action —
+        // unlike missing access, which would make the rename fail outright.
+        if store.renamePreviewState == .needsCalendarAccess { return false }
+        return !trimmed.isEmpty && trimmed != target.currentTitle
+            && store.renamePreviewState.summary?.totalRenamed != 0
+    }
+
+    /// Spells out the blast radius in calendar events rather than occurrences —
+    /// a weekly series is "1 weekly event", however many times it has repeated.
+    ///
+    /// Nil while the count is still being taken, which renders as blank space of
+    /// the same height: stating the scope in vaguer words first and swapping it
+    /// for the count reads as the scope changing, not as the count arriving.
+    private var scopeExplanation: String? {
+        switch store.renamePreviewState {
+        case .counting:
+            return nil
+        case .needsCalendarAccess:
+            return "\(RenameError.accessDenied)"
+        case .unavailable:
+            // The count didn't come, but the action is still on offer, so it
+            // has to be described — in the widest terms that stay true.
+            let quoted = "\u{201C}\(target.currentTitle)\u{201D}"
+            let scope = target.subtaskKey == nil
+                ? "every event under \(quoted), including its subtasks,"
+                : "every event titled \(quoted),"
+            return "Renames \(scope) past and future. This cannot be undone."
+        case .counted(let preview):
+            guard preview.totalRenamed > 0 else {
+                return "No events match this selection."
+            }
+            return "Renames \(preview.eventPhrase), past and future. "
+                + "This cannot be undone."
+        }
+    }
+
+    /// Matching events Chronicle cannot rewrite, e.g. on a subscribed calendar.
+    private var readOnlyNote: String? {
+        guard let skipped = store.renamePreviewState.summary?.skippedReadOnly,
+              skipped > 0 else { return nil }
+        return skipped == 1
+            ? "1 more is on a read-only calendar and will be skipped."
+            : "\(skipped) more are on a read-only calendar and will be skipped."
+    }
+
+    private func rename() {
+        guard canRename else { return }
+        store.renameTask(taskKey: target.taskKey,
+                         subtaskKey: target.subtaskKey,
+                         newTitle: newTitle)
+        dismiss()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(target.subtaskKey == nil ? "Rename Task" : "Rename Subtask")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("New title").font(.caption).foregroundStyle(.secondary)
+                TextField("New title", text: $newTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(rename)
+            }
+
+            // Both layers are always rendered, so the space is held from the
+            // first frame: the spinner crossfades into the count rather than
+            // the count pushing the buttons down as it arrives.
+            ZStack(alignment: .topLeading) {
+                // The spinner clears promptly once the count is in; only the
+                // count itself takes its time arriving.
+                ProgressView()
+                    // Circular explicitly: the default indeterminate style can
+                    // come out as a bar that stretches the full width, which
+                    // has no leading edge to align to.
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .opacity(scopeExplanation == nil ? 1 : 0)
+                    .animation(.easeOut(duration: 0.15), value: scopeExplanation)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(scopeExplanation ?? "")
+                    if let readOnlyNote {
+                        Text(readOnlyNote)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .opacity(scopeExplanation == nil ? 0 : 1)
+                .animation(.easeIn(duration: 0.5), value: scopeExplanation)
+            }
+            .frame(maxWidth: .infinity,
+                   minHeight: Self.explanationHeight,
+                   alignment: .topLeading)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Rename", action: rename)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canRename)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear {
+            newTitle = target.currentTitle
+            store.loadRenamePreview(taskKey: target.taskKey, subtaskKey: target.subtaskKey)
         }
     }
 }
