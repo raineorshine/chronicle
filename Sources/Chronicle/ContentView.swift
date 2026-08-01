@@ -85,6 +85,12 @@ private struct TaskRow: View {
                                                             subtaskKey: sub.key),
                                          nodeID: subID)
                         }
+                        .contextMenu {
+                            Button("Copy task name") { copyToPasteboard(sub.label) }
+                            CategorizeMenu(store: store,
+                                           taskKey: task.key,
+                                           subtaskKey: sub.key)
+                        }
                     }
                 } label: { taskRow }
             }
@@ -119,6 +125,11 @@ private struct TaskRow: View {
         }
         .rowHighlight(active: store.isHighlighted(task.key)
                       && store.selectedNodeID != nodeID)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Copy task name") { copyToPasteboard(task.label) }
+            CategorizeMenu(store: store, taskKey: task.key, subtaskKey: nil)
+        }
         .onHover { hovering in
             if hovering {
                 store.setHighlight(task.key)
@@ -138,6 +149,46 @@ private struct TaskRow: View {
 
     private static func hours(_ h: Double) -> String {
         String(format: "%.1fh", h)
+    }
+}
+
+/// Submenu of the activities a sidebar row can be filed under. Picking one
+/// rewrites the row's future events so the chosen activity becomes their task
+/// and the row keeps its own name as the subtask: `Faiz` filed under `em`
+/// becomes `em - Faiz`, `Health - Dr. Brown` filed under `Wellbeing` becomes
+/// `Wellbeing - Dr. Brown`.
+private struct CategorizeMenu: View {
+    @ObservedObject var store: DashboardStore
+    let taskKey: String
+    /// Set on a subtask row, so only that subtask's events are refiled.
+    let subtaskKey: String?
+
+    /// The activities that already act as categories — the ones with subtasks,
+    /// i.e. that head a `Task - Subtask` title. A standalone activity like
+    /// `Bavel` is a leaf, not a heading, so filing something under it would
+    /// invent a category the user never chose. The row's own activity stays in
+    /// the list so it reads the same from every row; picking it does nothing.
+    ///
+    /// Alphabetical: this is a lookup by name, unlike the sidebar itself, which
+    /// ranks by hours. Sorting is on the comparison key, not the label, so a
+    /// leading emoji doesn't decide where a name lands.
+    private var categories: [TaskSummary] {
+        store.taskList
+            .filter { !$0.subtasks.isEmpty }
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+    }
+
+    var body: some View {
+        Menu("Categorize") {
+            ForEach(categories) { category in
+                Button(category.label) {
+                    store.categorize(taskKey: taskKey,
+                                     subtaskKey: subtaskKey,
+                                     categoryLabel: category.label)
+                }
+            }
+        }
+        .disabled(categories.isEmpty || store.isReplacing || store.isRefreshing)
     }
 }
 
