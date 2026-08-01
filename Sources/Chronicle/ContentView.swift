@@ -388,11 +388,16 @@ private struct DashboardDetail: View {
                 Button {
                     store.refresh()
                 } label: {
-                    if store.isRefreshing {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
+                    // The spinner overlays the icon rather than replacing it so
+                    // the item keeps its size and the toolbar does not re-layout
+                    // while refreshing.
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                        .opacity(store.isRefreshing ? 0 : 1)
+                        .overlay {
+                            if store.isRefreshing {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
                 }
                 .disabled(store.isRefreshing)
                 .help("Reload calendar data")
