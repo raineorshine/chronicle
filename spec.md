@@ -151,21 +151,21 @@ Recurring events should **not** be expanded manually.
 Instead, query EventKit for the requested date range and count the
 returned occurrences.
 
-## Subtractive Calendars
+## Calendar Priority
 
-Any calendar may be designated **subtractive**. A subtractive calendar
-subtracts its time from any overlapping event in a non-subtractive calendar,
-while its own events are always counted in full — regardless of whether they
-overlap another calendar.
+`calendarAllowlist` is ordered: the first calendar has the highest priority,
+the second the next, and so on. Where events from two calendars overlap, the
+higher-priority one counts in full and the overlapping portion is removed from
+the lower-priority one.
 
-Examples:
+Examples, with Calendar B ranked above Calendar A:
 
-    Calendar A:               12–5pm  Swim
-    Calendar B (subtractive):  2–5pm  Instagram
+    Calendar A:  12–5pm  Swim
+    Calendar B:   2–5pm  Instagram
     ⇒ Swim = 2h (12–2),  Instagram = 3h
 
-    Calendar A:               12–5pm  Swim
-    Calendar B (subtractive):  4–7pm  Instagram
+    Calendar A:  12–5pm  Swim
+    Calendar B:   4–7pm  Instagram
     ⇒ Swim = 4h (12–4),  Instagram = 3h (counted in full)
 
 Rules:
@@ -173,10 +173,15 @@ Rules:
 -   Subtraction is applied at the interval level, before splitting across
     midnight and bucketing into days. Only `duration_seconds` is affected;
     occurrence counts are unchanged (one occurrence on the event's start day).
--   A subtractive calendar subtracts from **all** non-subtractive calendars.
--   Subtractive calendars do **not** subtract from one another.
--   A subtractive calendar is always extracted so it can subtract and so its own
-    time is counted, even when not listed in `calendarAllowlist`.
+-   Priority cascades: with `A, B, C`, A subtracts from both B and C, and B
+    subtracts from C.
+-   An event loses the **union** of the time claimed by every calendar above
+    its own, so overlapping cuts are never double-counted.
+-   Events sharing a rank — including two events in the same calendar — never
+    subtract from each other.
+-   The top calendar has nothing above it, so its events always count in full.
+-   Calendars outside `calendarAllowlist` are not extracted and take part in
+    nothing.
 
 ------------------------------------------------------------------------
 
@@ -327,15 +332,12 @@ Configuration is a JSON file created on first run:
 
 `~/Library/Application Support/Chronicle/config.json`
 
--   `calendarAllowlist` — calendar names to include (case-insensitive). Normally
-    managed from the app's **Calendars** toolbar picker (checkboxes with the
-    calendar's color); the app reads and writes this field. Hand-editing is
-    optional.
+-   `calendarAllowlist` — calendar names to include (case-insensitive), in
+    priority order (see **Calendar Priority**). Normally managed from the app's
+    **Calendars** toolbar picker (checkboxes with the calendar's color, and a
+    drag handle to reorder the selected ones); the app reads and writes this
+    field. Hand-editing is optional.
 -   `subtaskSeparators` — list of separators, defaults to `[" - ", " | ", " / "]`.
--   `subtractiveCalendars` — calendar names (case-insensitive) treated as
-    subtractive (see **Subtractive Calendars**). Managed from the same picker
-    via a per-calendar minus toggle. Marking a calendar subtractive also
-    includes it.
 -   `windowPastDays` / `windowFutureDays` — the rolling window (default 60 / 14).
 -   `weeklyMetricsCutoff` — weekday (Foundation numbering, 1 = Sunday … 7 =
     Saturday) at which the sidebar and legend hour tallies roll over from the

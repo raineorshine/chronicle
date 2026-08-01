@@ -86,9 +86,10 @@ own DerivedData.
 Open **Chronicle.app** and click the **Calendars** button in the toolbar. The
 first time, macOS prompts for calendar access — click **Allow**. You then get a
 checklist of all your calendars (with their colors); tick the ones you want
-included. Each row also has a minus-circle button to mark that calendar
-**subtractive** (see [Subtractive calendars](#subtractive-calendars)).
-Selections are saved and the dashboard re-extracts immediately.
+included. Selected calendars rise to the top of the list, where you can drag
+them by the grip on the left to set their **priority** (see
+[Calendar priority](#calendar-priority)). Selections are saved and the dashboard
+re-extracts immediately.
 
 ## Configuration
 
@@ -98,9 +99,8 @@ Your choices are stored in a config file (you normally don't edit this by hand):
 
 ```json
 {
-  "calendarAllowlist": ["Work", "Personal"],
+  "calendarAllowlist": ["Instagram", "Work", "Personal"],
   "subtaskSeparators": [" - ", " | ", " / "],
-  "subtractiveCalendars": ["Instagram"],
   "aliasChains": [["VP of Engineering", "em - Code Reviews"]],
   "windowPastDays": 60,
   "windowFutureDays": 14,
@@ -109,14 +109,11 @@ Your choices are stored in a config file (you normally don't edit this by hand):
 ```
 
 - **calendarAllowlist** — only these calendar names are extracted (matched
-  case-insensitively). Managed via the in-app **Calendars** picker; an empty
-  list extracts nothing.
+  case-insensitively), and the order is their **priority** order: the first
+  entry outranks the second, and so on (see below). Managed via the in-app
+  **Calendars** picker; an empty list extracts nothing.
 - **subtaskSeparators** — substrings treated as Task/Subtask dividers; a title
   is split on the leftmost occurrence of any of them (default `[" - ", " | ", " / "]`).
-- **subtractiveCalendars** — calendar names (case-insensitive) treated as
-  *subtractive*: their time is subtracted from overlapping events in other
-  calendars, while their own time is still counted in full (see below). A
-  subtractive calendar is always extracted, even if not in the allowlist.
 - **aliasChains** — rename chains that merge titles referring to the same task
   (see [Aliases](#aliases-renamed-tasks)). Managed via the in-app **Aliases**
   picker.
@@ -128,23 +125,27 @@ Your choices are stored in a config file (you normally don't edit this by hand):
   current week (Mon–today). Defaults to `6` (Friday), so Mon–Thu show last week
   and Fri–Sun show this week.
 
-## Subtractive calendars
+## Calendar priority
 
-Any calendar can be marked **subtractive**. A subtractive calendar subtracts its
-time from any overlapping event in a non-subtractive calendar, while its own
-events are always counted in full — regardless of whether they overlap anything.
+Selected calendars are kept in **priority order**. Where two of them have
+overlapping events, the higher calendar counts in full and the overlapping
+portion is removed from the lower one. Drag a calendar by the grip on the left
+of its row in the **Calendars** picker to move it up or down.
 
-For example, with a subtractive **Instagram** calendar:
+For example, with **Instagram** ranked above **Personal**:
 
-| Calendar A (Swim) | Instagram (subtractive) | Swim counts | Instagram counts |
-| ----------------- | ----------------------- | ----------- | ---------------- |
-| 12–5pm            | 2–5pm                   | 2h (12–2)   | 3h               |
-| 12–5pm            | 4–7pm                   | 4h (12–4)   | 3h               |
+| Personal (Swim) | Instagram | Swim counts | Instagram counts |
+| --------------- | --------- | ----------- | ---------------- |
+| 12–5pm          | 2–5pm     | 2h (12–2)   | 3h               |
+| 12–5pm          | 4–7pm     | 4h (12–4)   | 3h               |
 
-To mark a calendar subtractive, open the **Calendars** picker and click the
-minus-circle icon next to it. Marking a calendar subtractive also includes it,
-since its own time is still counted. Subtractive calendars do not subtract from
-each other.
+Priority cascades down the whole list. With `A, B, C`, calendar A subtracts from
+both B and C, and B subtracts from C. The top calendar is never reduced by
+anything, and events in the *same* calendar never subtract from each other, so
+two overlapping meetings on one calendar both count in full.
+
+A newly ticked calendar joins at the bottom, where it subtracts from nothing
+until you drag it up.
 
 ## Aliases (renamed tasks)
 
@@ -307,9 +308,9 @@ the demo rows are automatically replaced the first time you extract real data.
   **label**; the grouping **key** lowercases the label with emoji and punctuation removed.
 - **Aggregation.** All-day events are skipped; events are clipped to the window
   and split across local midnight into per-day duration segments. One occurrence
-  is counted on the day the event starts. Time from **subtractive** calendars is
-  removed from overlapping events in other calendars before bucketing, while the
-  subtractive events themselves are counted in full.
+  is counted on the day the event starts. Before bucketing, each event loses the
+  time claimed by any **higher-priority** calendar it overlaps, so only the top
+  calendar is guaranteed to count in full.
 - **Rolling rebuild.** Each run deletes and regenerates the window's rows in a
   single transaction, so edited/moved/deleted/detached recurring events are
   handled automatically.

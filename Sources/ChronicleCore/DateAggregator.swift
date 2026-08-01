@@ -62,9 +62,9 @@ public struct DateAggregator {
         let formatter = Self.dateFormatter(calendar: calendar)
         var buckets: [Key: DailyRow] = [:]
 
-        // Union of all subtractive intervals (clipped to the window, merged),
-        // removed from every non-subtractive event below.
-        let cuts = subtractiveIntervals(events, window: window)
+        // Per rank, the time claimed by higher-priority calendars, removed from
+        // that rank's events below.
+        let cuts = cutsByRank(events, window: window)
 
         func key(for date: String, event: EventInput) -> Key {
             Key(date: date,
@@ -100,12 +100,12 @@ public struct DateAggregator {
             buckets[key(for: occurrenceDay, event: event),
                     default: emptyRow(occurrenceDay, event)].occurrenceCount += 1
 
-            // 4. determine the intervals that contribute duration: subtractive
-            //    events keep their full span; others have subtractive overlaps
-            //    removed (which may split them into several pieces or none).
-            let intervals: [(start: Date, end: Date)] = event.isSubtractive
-                ? [(start, end)]
-                : Self.subtract(base: (start, end), cuts: cuts)
+            // 4. determine the intervals that contribute duration: whatever
+            //    higher-priority calendars claimed is removed, which may split
+            //    the event into several pieces or leave none. The top rank has
+            //    no cuts, so its events always count in full.
+            let intervals = Self.subtract(base: (start, end),
+                                          cuts: cuts[event.calendarRank] ?? [])
 
             // 5. split each remaining interval across local midnight and sum.
             for interval in intervals {
@@ -126,20 +126,35 @@ public struct DateAggregator {
         return Array(buckets.values)
     }
 
-    /// Collects every subtractive event's interval, clips it to the window, and
-    /// returns them sorted by start with overlaps merged, ready for `subtract`.
-    private func subtractiveIntervals(_ events: [EventInput],
-                                      window: ExtractionWindow) -> [(start: Date, end: Date)] {
-        var intervals: [(start: Date, end: Date)] = []
-        for event in events where event.isSubtractive && !event.isAllDay {
+    /// For every rank present in `events`, the merged union of the intervals
+    /// claimed by *strictly higher-priority* (lower-rank) events, clipped to the
+    /// window and ready for `subtract`.
+    ///
+    /// Walking the ranks in ascending order accumulates the union once, so each
+    /// rank's cuts are the running total of everything above it. Events sharing a
+    /// rank are absent from their own cuts and so never subtract from each other.
+    private func cutsByRank(_ events: [EventInput],
+                            window: ExtractionWindow) -> [Int: [(start: Date, end: Date)]] {
+        var claimed: [Int: [(start: Date, end: Date)]] = [:]
+        for event in events where !event.isAllDay {
             let start = max(event.start, window.start)
             let end = min(event.end, window.end)
-            if end > start { intervals.append((start, end)) }
+            if end > start { claimed[event.calendarRank, default: []].append((start, end)) }
         }
-        intervals.sort { $0.start < $1.start }
 
+        var cuts: [Int: [(start: Date, end: Date)]] = [:]
+        var union: [(start: Date, end: Date)] = []
+        for rank in claimed.keys.sorted() {
+            cuts[rank] = union
+            union = Self.merge(union + (claimed[rank] ?? []))
+        }
+        return cuts
+    }
+
+    /// Sorts `intervals` by start and merges every overlapping or touching pair.
+    static func merge(_ intervals: [(start: Date, end: Date)]) -> [(start: Date, end: Date)] {
         var merged: [(start: Date, end: Date)] = []
-        for interval in intervals {
+        for interval in intervals.sorted(by: { $0.start < $1.start }) {
             if let last = merged.last, interval.start <= last.end {
                 merged[merged.count - 1].end = max(last.end, interval.end)
             } else {

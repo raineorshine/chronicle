@@ -6,29 +6,26 @@ import EventKit
 /// through here, so they can never disagree about what counts.
 public enum CalendarSelection {
 
-    /// The calendars in `all` that the config includes: the allowlist plus every
-    /// subtractive calendar. Subtractive calendars are always included so they can
-    /// subtract (and their own time counts), even when not explicitly allowlisted.
+    /// The calendars in `all` that the config's allowlist includes, returned in
+    /// the allowlist's priority order (highest priority first). Allowlist entries
+    /// naming a calendar the user no longer has are skipped.
     public static func included(from all: [EKCalendar],
                                 config: ChronicleConfig) -> [EKCalendar] {
-        let allow = Set(config.calendarAllowlist.map(normalize))
-        let subtractive = Set(config.subtractiveCalendars.map(normalize))
-        return all.filter {
-            let key = normalize($0.title)
-            return allow.contains(key) || subtractive.contains(key)
-        }
+        let byKey = Dictionary(all.map { (normalize($0.title), $0) },
+                               uniquingKeysWith: { first, _ in first })
+        return config.calendarAllowlist.compactMap { byKey[normalize($0)] }
     }
 
-    /// The included calendars that hold *planned* time — everything `included`
-    /// returns, minus the subtractive ones. A subtractive calendar records what
-    /// actually happened rather than what is scheduled, so a view answering "when
-    /// does this happen" would otherwise show an activity twice on any day it was
-    /// both planned and logged.
-    public static func planned(from all: [EKCalendar],
-                               config: ChronicleConfig) -> [EKCalendar] {
-        let subtractive = Set(config.subtractiveCalendars.map(normalize))
-        return included(from: all, config: config)
-            .filter { !subtractive.contains(normalize($0.title)) }
+    /// Priority rank per normalized calendar title: `0` for the first allowlist
+    /// entry, `1` for the next, and so on. Titles outside the allowlist are
+    /// absent — callers rank those `Int.max`, which subtracts from nothing.
+    public static func ranks(config: ChronicleConfig) -> [String: Int] {
+        var ranks: [String: Int] = [:]
+        for title in config.calendarAllowlist {
+            let key = normalize(title)
+            if ranks[key] == nil { ranks[key] = ranks.count }
+        }
+        return ranks
     }
 
     /// Comparison form for a calendar title: trimmed and lowercased.

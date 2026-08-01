@@ -7,9 +7,9 @@ import EventKit
 /// writes and never prompts. Without Calendar access the reads come back empty, so
 /// a decorative preview can't put a permission dialog in front of the user.
 ///
-/// Unlike the extractor and the replacer, this reads only the *planned*
-/// calendars: an activity logged on a subtractive calendar as well as scheduled
-/// on a normal one is one occurrence, not two.
+/// Calendar priority is irrelevant here: the preview draws when one task happens,
+/// so overlapping occurrences of that same task read as a union rather than
+/// subtracting from one another.
 public final class ScheduleReader {
     private let store: EKEventStore
 
@@ -37,12 +37,12 @@ public final class ScheduleReader {
         guard let week = calendar.dateInterval(of: .weekOfYear, for: now),
               let month = calendar.dateInterval(of: .month, for: now) else { return [] }
 
-        let planned = CalendarSelection.planned(from: store.calendars(for: .event), config: config)
-        guard !planned.isEmpty else { return [] }
+        let included = CalendarSelection.included(from: store.calendars(for: .event), config: config)
+        guard !included.isEmpty else { return [] }
 
         let predicate = store.predicateForEvents(withStart: min(week.start, month.start),
                                                  end: max(week.end, month.end),
-                                                 calendars: planned)
+                                                 calendars: included)
 
         // Series frequencies resolved for detached occurrences, so a series with
         // several edited instances costs one lookup rather than one per instance.

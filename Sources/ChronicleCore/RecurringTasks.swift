@@ -75,9 +75,9 @@ public final class RecurringTaskReader {
 
     /// Every task and subtask with a recurring event scheduled from `now` onward.
     ///
-    /// Only calendars Chronicle already tracks (allowlisted or subtractive) are
-    /// considered, matching `CalendarExtractor.extract`, so the marker follows
-    /// the same events the dashboard counts. Returns an empty set when full
+    /// Only calendars Chronicle already tracks (the allowlist) are considered,
+    /// matching `CalendarExtractor.extract`, so the marker follows the same
+    /// events the dashboard counts. Returns an empty set when full
     /// Calendar access is missing — this only drives a decoration, so it stays
     /// silent rather than throwing or prompting.
     public func futureRecurringIdentities(config: ChronicleConfig,
@@ -89,13 +89,8 @@ public final class RecurringTaskReader {
         let end = calendar.date(byAdding: .day, value: horizonDays, to: now) ?? now
         guard end > now else { return [] }
 
-        let all = store.calendars(for: .event)
-        let allow = Set(config.calendarAllowlist.map(Self.normalize))
-        let subtractive = Set(config.subtractiveCalendars.map(Self.normalize))
-        let included = all.filter {
-            let key = Self.normalize($0.title)
-            return allow.contains(key) || subtractive.contains(key)
-        }
+        let included = CalendarSelection.included(from: store.calendars(for: .event),
+                                                 config: config)
         guard !included.isEmpty else { return [] }
 
         let predicate = store.predicateForEvents(withStart: now, end: end, calendars: included)
@@ -107,9 +102,5 @@ public final class RecurringTaskReader {
 
         return RecurringTaskScanner.identities(in: occurrences,
                                                separators: config.subtaskSeparators)
-    }
-
-    private static func normalize(_ s: String) -> String {
-        s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }

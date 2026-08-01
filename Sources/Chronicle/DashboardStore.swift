@@ -110,11 +110,10 @@ final class DashboardStore: ObservableObject {
     /// True while calendars are being loaded / access requested.
     @Published var isLoadingCalendars = false
 
-    /// Normalized titles of calendars currently included (mirrors config allowlist).
-    private var allowedTitleKeys: Set<String> = []
-
-    /// Normalized titles of calendars currently marked subtractive.
-    private var subtractiveTitleKeys: Set<String> = []
+    /// Priority rank per normalized title for the calendars currently included
+    /// (mirrors the config allowlist, whose order *is* the priority order).
+    /// Membership answers "is this calendar selected"; the value orders the list.
+    private var allowedRanks: [String: Int] = [:]
 
     /// Normalized titles (trim + lowercase) of calendars set to whole-calendar
     /// segment mode — mirrors config, used by the picker predicate.
@@ -1003,8 +1002,7 @@ final class DashboardStore: ObservableObject {
 
     private func syncSelectionFromConfig() {
         if let config = try? ChronicleConfig.load() {
-            allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
-            subtractiveTitleKeys = Set(config.subtractiveCalendars.map(Self.normalizeTitle))
+            allowedRanks = CalendarSelection.ranks(config: config)
             wholeCalendarTitleKeys = Set(config.wholeCalendarSegments.map(Self.normalizeTitle))
             wholeCalendarKeys = Set(config.wholeCalendarSegments.map { TitleParser.normalize($0).key })
             taskColors = config.taskColors
@@ -1015,21 +1013,33 @@ final class DashboardStore: ObservableObject {
     }
 
     func isCalendarSelected(_ info: CalendarInfo) -> Bool {
-        allowedTitleKeys.contains(Self.normalizeTitle(info.title))
+        allowedRanks[Self.normalizeTitle(info.title)] != nil
     }
 
-    /// `availableCalendars` reordered so selected (allowlisted) calendars come
-    /// first. `availableCalendars` is already sorted alphabetically and this is a
-    /// stable partition, so A→Z order is preserved within each group. Re-sorts
-    /// live when a calendar is toggled (`persist` fires `objectWillChange`).
-    var sortedAvailableCalendars: [CalendarInfo] {
-        let selected = availableCalendars.filter { isCalendarSelected($0) }
-        let unselected = availableCalendars.filter { !isCalendarSelected($0) }
-        return selected + unselected
+    /// The selected calendars in priority order (highest priority first) — the
+    /// order the user drags into, mirroring the config allowlist. Re-sorts live
+    /// when a calendar is toggled or moved (`persist` fires `objectWillChange`).
+    ///
+    /// Deduplicated by title, because everything downstream is keyed by title:
+    /// two same-named calendars from different accounts are one allowlist entry
+    /// and one dashboard segment, so they get one row here rather than a pair
+    /// that moves and toggles in lockstep.
+    var selectedCalendars: [CalendarInfo] {
+        var seen: Set<String> = []
+        return availableCalendars
+            .compactMap { info -> (CalendarInfo, Int)? in
+                let key = Self.normalizeTitle(info.title)
+                guard let rank = allowedRanks[key], seen.insert(key).inserted else { return nil }
+                return (info, rank)
+            }
+            .sorted { $0.1 < $1.1 }
+            .map(\.0)
     }
 
-    func isCalendarSubtractive(_ info: CalendarInfo) -> Bool {
-        subtractiveTitleKeys.contains(Self.normalizeTitle(info.title))
+    /// The calendars not currently included, in `availableCalendars`' own A→Z
+    /// order. They have no place in the priority order, so they list after it.
+    var unselectedCalendars: [CalendarInfo] {
+        availableCalendars.filter { !isCalendarSelected($0) }
     }
 
     /// Whether a calendar renders as one whole-calendar segment at the top level
@@ -1038,7 +1048,7 @@ final class DashboardStore: ObservableObject {
         wholeCalendarTitleKeys.contains(Self.normalizeTitle(info.title))
     }
 
-    var selectedCalendarCount: Int { allowedTitleKeys.count }
+    var selectedCalendarCount: Int { allowedRanks.count }
 
     /// Called when the app becomes active (e.g. returning from System Settings)
     /// and on launch. Re-reads the live authorization status so the picker
@@ -1107,36 +1117,50 @@ final class DashboardStore: ObservableObject {
         }
     }
 
-    /// Includes/excludes a calendar, persists the allowlist, and re-extracts.
-    /// Removing a calendar also clears any subtractive designation.
+    /// Includes/excludes a calendar, persists the allowlist, and re-extracts. A
+    /// newly included calendar joins at the bottom of the priority order, so it
+    /// subtracts from nothing until the user drags it up.
     func setCalendar(_ info: CalendarInfo, included: Bool) {
         do {
             var config = try ChronicleConfig.load()
             let key = Self.normalizeTitle(info.title)
             config.calendarAllowlist.removeAll { Self.normalizeTitle($0) == key }
-            if included {
-                config.calendarAllowlist.append(info.title)
-            } else {
-                config.subtractiveCalendars.removeAll { Self.normalizeTitle($0) == key }
-            }
+            if included { config.calendarAllowlist.append(info.title) }
             try persist(config)
         } catch {
             errorMessage = "\(error)"
         }
     }
 
-    /// Marks a calendar subtractive (or not). Marking subtractive auto-includes
-    /// it, since a subtractive calendar's own time is still counted.
-    func setSubtractive(_ info: CalendarInfo, subtractive: Bool) {
+    /// Moves a selected calendar to `index` in the priority order (0 = highest
+    /// priority), persists, and re-extracts — priority decides which events lose
+    /// their overlapping time, so the aggregates have to be rebuilt.
+    ///
+    /// `index` is an insertion slot in the list *as displayed*, so dropping a
+    /// calendar below its current position lands one slot higher once it has been
+    /// lifted out.
+    func moveCalendar(_ info: CalendarInfo, to index: Int) {
+        let key = Self.normalizeTitle(info.title)
+        var order = selectedCalendars.map(\.title)
+        guard let from = order.firstIndex(where: { Self.normalizeTitle($0) == key }) else { return }
+        let to = min(max(index > from ? index - 1 : index, 0), order.count - 1)
+        guard to != from else { return }
+        order.insert(order.remove(at: from), at: to)
+
         do {
             var config = try ChronicleConfig.load()
-            let key = Self.normalizeTitle(info.title)
-            config.subtractiveCalendars.removeAll { Self.normalizeTitle($0) == key }
-            if subtractive {
-                config.subtractiveCalendars.append(info.title)
-                if !config.calendarAllowlist.contains(where: { Self.normalizeTitle($0) == key }) {
-                    config.calendarAllowlist.append(info.title)
+            // The allowlist can name calendars the user no longer has (a renamed
+            // or deleted one), which never appear in the picker. Permuting only
+            // the slots the picker *does* show leaves those entries where they
+            // are instead of silently reshuffling them.
+            let moved = Set(order.map(Self.normalizeTitle))
+            var next = 0
+            config.calendarAllowlist = config.calendarAllowlist.map { title in
+                guard moved.contains(Self.normalizeTitle(title)), next < order.count else {
+                    return title
                 }
+                defer { next += 1 }
+                return order[next]
             }
             try persist(config)
         } catch {
@@ -1147,8 +1171,7 @@ final class DashboardStore: ObservableObject {
     /// Saves the config, refreshes local mirrors, and re-extracts.
     private func persist(_ config: ChronicleConfig) throws {
         try config.save()
-        allowedTitleKeys = Set(config.calendarAllowlist.map(Self.normalizeTitle))
-        subtractiveTitleKeys = Set(config.subtractiveCalendars.map(Self.normalizeTitle))
+        allowedRanks = CalendarSelection.ranks(config: config)
         objectWillChange.send()
         refresh()
     }
