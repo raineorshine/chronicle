@@ -15,7 +15,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_DIR="$REPO_ROOT/scripts"
 DERIVED="$REPO_ROOT/.build-xcode"
 BUILT_APP="$DERIVED/Build/Products/Debug/Chronicle.app"
-BUNDLE_ID="com.chronicle.app"
+# Debug builds use a dev-only bundle ID (see project.yml), so the permission
+# reset below can never touch the installed /Applications/Chronicle.app.
+BUNDLE_ID="com.chronicle.app.dev"
 
 LAUNCH=true
 FORCE_RESET_TCC=false
@@ -85,12 +87,10 @@ codesign --force --options runtime \
 codesign --verify --strict "$BUILT_APP"
 
 if [[ "$RESET_TCC" == true ]]; then
-	# tccutil's finest granularity is the bundle ID, and this build shares it
-	# with the installed /Applications/Chronicle.app — so both lose Calendar
-	# access here. Say so, rather than letting it look like a local-only reset.
+	# Dev builds have their own bundle ID (see project.yml), so this only
+	# affects dev builds — the installed Chronicle.app's grant is untouched.
 	echo "==> Clearing the stale ad-hoc Calendar permission for $BUNDLE_ID…"
-	echo "    Also clears it for the installed Chronicle.app (same bundle ID)."
-	echo "    Re-grant in either app: Refresh in the toolbar → Allow."
+	echo "    Re-grant in the dev app: Refresh in the toolbar → Allow."
 	tccutil reset Calendar "$BUNDLE_ID" >/dev/null 2>&1 || true
 fi
 

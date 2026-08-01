@@ -54,10 +54,20 @@ targets:
       base:
         PRODUCT_NAME: Chronicle
         PRODUCT_BUNDLE_IDENTIFIER: com.chronicle.app
+        CHRONICLE_APP_NAME: Chronicle
         INFOPLIST_FILE: App/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/Chronicle.entitlements
         ENABLE_APP_SANDBOX: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # Debug builds get their own bundle ID and name so macOS treats them
+        # as a separate app from the installed /Applications/Chronicle.app:
+        # separate Calendar (TCC) permission, separate saved state. A dev
+        # build — or a permission reset aimed at it — can never touch the
+        # installed app's grant.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.chronicle.app.dev
+          CHRONICLE_APP_NAME: Chronicle Dev
 
   ChronicleCoreTests:
     type: bundle.unit-test
