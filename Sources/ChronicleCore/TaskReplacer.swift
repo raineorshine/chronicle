@@ -262,6 +262,66 @@ public final class TaskReplacer {
                                   skippedReadOnly: plan.skippedReadOnly)
     }
 
+    /// Files every future event in this scope under `categoryLabel`, from the
+    /// start of today onward, keeping each event's own leaf name: `Health - Dr.
+    /// Brown` becomes `Wellbeing - Dr. Brown` while `Faiz` becomes `em - Faiz`
+    /// (see `TaskCategorizer`). Unlike `replace`, which flattens a whole scope to
+    /// one title, this rewrites each matching event to its own new title, so a
+    /// task's subtasks survive the change.
+    @discardableResult
+    public func categorize(targetTaskKey: String,
+                           targetSubtaskKey: String? = nil,
+                           categoryLabel: String,
+                           config: ChronicleConfig,
+                           futureHorizonDays: Int = TaskReplacer.defaultFutureHorizonDays,
+                           now: Date = Date(),
+                           calendar: Calendar = .current) throws -> ReplacementSummary {
+        let category = categoryLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !category.isEmpty else { throw ReplacementError.emptyTitle }
+
+        let (events, plan) = try planWrites(targetTaskKey: targetTaskKey,
+                                           targetSubtaskKey: targetSubtaskKey,
+                                           config: config,
+                                           futureHorizonDays: futureHorizonDays,
+                                           now: now,
+                                           calendar: calendar)
+        guard !plan.ops.isEmpty else {
+            return ReplacementSummary(replacedSeries: 0,
+                                      replacedStandalone: 0,
+                                      skippedReadOnly: plan.skippedReadOnly)
+        }
+
+        var replacedSeries = 0
+        var replacedStandalone = 0
+        do {
+            for op in plan.ops {
+                let event = events[op.candidateIndex]
+                // Nothing to keep, or already filed here: leave the event alone.
+                guard let title = TaskCategorizer.categorizedTitle(
+                        rawTitle: event.title ?? "",
+                        categoryLabel: category,
+                        separators: config.subtaskSeparators) else { continue }
+                event.title = title
+                switch op.span {
+                case .futureEvents:
+                    try store.save(event, span: .futureEvents, commit: false)
+                    replacedSeries += 1
+                case .thisEvent:
+                    try store.save(event, span: .thisEvent, commit: false)
+                    replacedStandalone += 1
+                }
+            }
+            try store.commit()
+        } catch {
+            store.reset()
+            throw error
+        }
+
+        return ReplacementSummary(replacedSeries: replacedSeries,
+                                  replacedStandalone: replacedStandalone,
+                                  skippedReadOnly: plan.skippedReadOnly)
+    }
+
     /// What `replace` would do for this scope, without touching the calendar.
     /// Lets the UI state the blast radius — in events, not occurrences — before
     /// the user commits to a change that cannot be undone.

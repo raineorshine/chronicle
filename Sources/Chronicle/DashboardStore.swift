@@ -761,6 +761,74 @@ final class DashboardStore: ObservableObject {
         }
     }
 
+    /// Files a sidebar scope under the task `categoryLabel` names, by rewriting
+    /// the title of its future Calendar events from the start of today onward.
+    /// Each event keeps its own leaf name — `Health - Dr. Brown` becomes
+    /// `Wellbeing - Dr. Brown`, an uncategorized `Faiz` becomes `em - Faiz` — so,
+    /// unlike `replaceRecurringTask`, categorizing a whole task leaves the
+    /// subtasks under it intact.
+    ///
+    /// Like a replace, this writes to the user's actual calendar and cannot be
+    /// undone; past events keep their old title.
+    func categorize(taskKey: String, subtaskKey: String? = nil, categoryLabel: String) {
+        let label = categoryLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty, !isReplacing, !isRefreshing else { return }
+        // Filing a scope under the activity it already sits in changes nothing —
+        // and must not read as a failure.
+        guard TitleParser.normalize(label).key != taskKey else { return }
+        isReplacing = true
+        errorMessage = nil
+        // Captured before the rewrite, while the old labels are still listed.
+        let resultTitle = categorizedTitle(taskKey: taskKey,
+                                           subtaskKey: subtaskKey,
+                                           categoryLabel: label)
+        Task {
+            do {
+                let config = try ChronicleConfig.load()
+                let extractor = CalendarExtractor()
+                try await extractor.requestAccess()
+                let summary = try TaskReplacer().categorize(targetTaskKey: taskKey,
+                                                            targetSubtaskKey: subtaskKey,
+                                                            categoryLabel: label,
+                                                            config: config)
+                await MainActor.run {
+                    self.isReplacing = false
+                    guard summary.totalReplaced > 0 else {
+                        self.errorMessage = summary.skippedReadOnly > 0
+                            ? "Nothing was categorized: the \(summary.skippedReadOnly) matching "
+                                + "future event(s) are on a calendar that doesn't allow edits."
+                            : "No future events matching this selection were found to categorize."
+                        return
+                    }
+                    self.refresh { self.selectReplacedScope(newTitle: resultTitle) }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isReplacing = false
+                    self.errorMessage = "\(error)"
+                }
+            }
+        }
+    }
+
+    /// The event title a categorized scope lands on, used to follow the selection
+    /// over to it. A subtask — or a task with no subtasks — has a single leaf name
+    /// that survives the rewrite; a task *with* subtasks spreads across several
+    /// new titles, so only the category itself is named and the selection settles
+    /// at task level.
+    private func categorizedTitle(taskKey: String,
+                                  subtaskKey: String?,
+                                  categoryLabel: String) -> String {
+        let task = taskList.first { $0.key == taskKey }
+        let leaf: String? = if let subtaskKey {
+            task?.subtasks.first { $0.key == subtaskKey }?.label
+        } else {
+            (task?.subtasks.isEmpty ?? true) ? task?.label : nil
+        }
+        guard let leaf else { return categoryLabel }
+        return categoryLabel + (subtaskSeparators.first ?? " - ") + leaf
+    }
+
     /// Moves the selection onto the activity `newTitle` now names, so a replace
     /// lands on the renamed task rather than stranding the user on the old one
     /// (which, from today onward, is empty).
