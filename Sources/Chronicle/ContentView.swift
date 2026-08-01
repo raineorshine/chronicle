@@ -1161,6 +1161,13 @@ private struct WeeklyChartCard: View {
     }
 
     private var chart: some View {
+        GeometryReader { geo in
+            chartBody(width: geo.size.width)
+        }
+        .frame(height: 300)
+    }
+
+    private func chartBody(width: CGFloat) -> some View {
         Chart(store.chartPoints) { point in
             if store.chartStyle == .area {
                 AreaMark(
@@ -1182,17 +1189,32 @@ private struct WeeklyChartCard: View {
         .chartForegroundStyleScale(domain: store.styleDomain, range: store.styleRange)
         .chartXScale(domain: store.windowDateDomain)
         .chartXAxis {
-            AxisMarks(values: store.windowWeekDates) { value in
-                if let date = value.as(Date.self) {
-                    AxisValueLabel(anchor: axisLabelAnchor(for: date)) {
-                        Text(store.weekLabelShort(date: date))
+            if store.usesMonthAxis {
+                AxisMarks(values: store.monthBoundaryDates) { _ in
+                    AxisGridLine()
+                }
+                AxisMarks(values: store.monthLabelDates) { value in
+                    if let date = value.as(Date.self) {
+                        AxisValueLabel(anchor: .topLeading) {
+                            Text(store.monthLabel(date: date))
+                                .font(Self.axisLabelTextStyle)
+                                .padding(.leading, 4)
+                        }
+                    }
+                }
+            } else {
+                AxisMarks(values: labeledWeekDates(chartWidth: width)) { value in
+                    if let date = value.as(Date.self) {
+                        AxisValueLabel(anchor: axisLabelAnchor(for: date)) {
+                            Text(store.weekLabelRange(date: date))
+                                .font(Self.axisLabelTextStyle)
+                        }
                     }
                 }
             }
         }
         .chartYAxisLabel("Hours")
         .chartLegend(.hidden)
-        .frame(height: 300)
         .animation(.easeInOut(duration: 0.15), value: store.highlightedSegmentKey)
         .chartOverlay { proxy in
             GeometryReader { geo in
@@ -1236,6 +1258,31 @@ private struct WeeklyChartCard: View {
                 }
             }
         }
+    }
+
+    private static let axisLabelTextStyle = Font.caption2
+    private static let axisLabelFont = NSFont.preferredFont(forTextStyle: .caption2)
+
+    /// Which weeks get a label. Week ranges are twice as wide as the bare start
+    /// dates they replaced, so at eight weeks in a narrow window they collide;
+    /// when that happens, label every Nth week instead of truncating the range.
+    /// Counted from the last week so the current one is always labeled.
+    ///
+    /// A tick needs ~1.5 label widths of room: the endpoint labels are anchored
+    /// inward, so they reach a full width toward their neighbor's half width.
+    private func labeledWeekDates(chartWidth: CGFloat) -> [Date] {
+        let dates = store.windowWeekDates
+        guard dates.count > 1 else { return dates }
+        // The plot is inset by the Y axis labels on the trailing side only.
+        let spacing = max(chartWidth - 52, 1) / CGFloat(dates.count - 1)
+        let widest = dates
+            .map { (store.weekLabelRange(date: $0) as NSString)
+                .size(withAttributes: [.font: Self.axisLabelFont]).width }
+            .max() ?? 0
+        let stride = max(1, Int(ceil(widest * 1.5 / spacing)))
+        return dates.enumerated()
+            .filter { (dates.count - 1 - $0.offset) % stride == 0 }
+            .map(\.element)
     }
 
     /// Because the X scale is continuous with its domain pinned to the first and

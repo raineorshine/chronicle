@@ -390,17 +390,6 @@ final class DashboardStore: ObservableObject {
         return nil
     }
 
-    /// Short axis/tooltip label for a `yyyy-MM-dd` week start, e.g. "Jul 14".
-    func weekLabelShort(_ week: String) -> String {
-        guard let date = formatter().date(from: week) else { return week }
-        let out = DateFormatter()
-        out.calendar = calendar
-        out.timeZone = calendar.timeZone
-        out.locale = .current
-        out.setLocalizedDateFormatFromTemplate("MMMd")
-        return out.string(from: date)
-    }
-
     func weekDate(_ week: String) -> Date { formatter().date(from: week) ?? Date() }
 
 
@@ -959,9 +948,32 @@ final class DashboardStore: ObservableObject {
         return lo...hi
     }
 
-    /// Short axis label for a week-start `Date`, e.g. "Jul 14".
-    func weekLabelShort(date: Date) -> String {
-        weekLabelShort(formatter().string(from: date))
+    /// Axis label spanning the whole week, e.g. "Jul 6–12" (or "Jun 29–Jul 5"
+    /// when the week straddles a month).
+    func weekLabelRange(date: Date) -> String {
+        ChartAxis.weekRangeLabel(weekStart: date, calendar: calendar)
+    }
+
+    /// Long windows label the axis by month instead of by week: twelve week
+    /// ranges don't fit side by side, and at that span months are the useful
+    /// unit. The month dividers deliberately fall inside weeks rather than on
+    /// week boundaries.
+    var usesMonthAxis: Bool { weeksWindow >= 12 }
+
+    /// Where to draw the month divider rules on a month-labeled axis.
+    var monthBoundaryDates: [Date] {
+        ChartAxis.monthBoundaries(in: windowDateDomain, calendar: calendar)
+    }
+
+    /// Where to place month names: at the start of each month's visible span,
+    /// left-aligned to its divider.
+    var monthLabelDates: [Date] {
+        ChartAxis.monthLabelDates(in: windowDateDomain, calendar: calendar)
+    }
+
+    /// Month name for a month-axis label position, e.g. "Jul".
+    func monthLabel(date: Date) -> String {
+        ChartAxis.monthLabel(for: date, calendar: calendar)
     }
 
     /// Whether a week-start `Date` is the current (in-progress) week.
