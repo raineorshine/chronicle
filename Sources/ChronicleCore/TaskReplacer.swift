@@ -208,8 +208,8 @@ public final class TaskReplacer {
     /// the start of today onward. Past events are left untouched. Passing a
     /// `targetSubtaskKey` narrows the change to that one subtask.
     ///
-    /// Only calendars Chronicle already tracks (allowlisted or subtractive) are
-    /// considered, matching `CalendarExtractor.extract`, so this never edits
+    /// Only calendars Chronicle already tracks (the allowlist) are considered,
+    /// matching `CalendarExtractor.extract`, so this never edits
     /// events the dashboard doesn't count.
     @discardableResult
     public func replace(targetTaskKey: String,

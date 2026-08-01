@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Charts
+import UniformTypeIdentifiers
 import ChronicleCore
 
 /// Replace the pasteboard contents with `string`.
@@ -900,21 +901,18 @@ private struct CalendarPicker: View {
                     .padding(14)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(store.sortedAvailableCalendars) { cal in
-                            CalendarPickerRow(store: store, calendar: cal)
-                        }
-                    }
-                    .padding(.vertical, 6)
+                    CalendarPickerRows(store: store)
+                        .padding(.vertical, 6)
                 }
                 .frame(maxHeight: 360)
 
                 Divider()
-                Text("Selected calendars are included in your metrics. The "
-                     + "columns icon toggles whether a calendar shows as one "
-                     + "whole-calendar segment or breaks out into individual "
-                     + "tasks. The minus icon marks a calendar subtractive — its "
-                     + "time is removed from overlapping events in other calendars.")
+                Text("Selected calendars are included in your metrics, in "
+                     + "priority order — drag the handle to reorder. When events "
+                     + "overlap, the higher calendar counts in full and the "
+                     + "overlap is removed from the lower one. The columns icon "
+                     + "toggles whether a calendar shows as one whole-calendar "
+                     + "segment or breaks out into individual tasks.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -949,16 +947,89 @@ private struct CalendarPicker: View {
     }
 }
 
+/// The picker's calendar list: the selected ones first, in priority order and
+/// draggable to reorder, then everything else.
+private struct CalendarPickerRows: View {
+    @ObservedObject var store: DashboardStore
+
+    /// Where a hovering drag would insert, drawn as an insertion line.
+    @StateObject private var indicator = DropIndicator()
+
+    /// Measured height of one row, so a drop can tell "above this row" from
+    /// "below it". Every row is the same height, so one measurement covers all.
+    @State private var rowHeight: CGFloat = 24
+
+    /// Gap between rows. Part of the slot arithmetic, so the drop target can
+    /// cover it rather than leaving it a dead strip between two rows.
+    private static let rowSpacing: CGFloat = 2
+
+    var body: some View {
+        let selected = store.selectedCalendars
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            ForEach(Array(selected.enumerated()), id: \.element.id) { index, cal in
+                CalendarPickerRow(store: store, calendar: cal) {
+                    NSItemProvider(object: cal.id as NSString)
+                }
+                .measureRowHeight(into: $rowHeight)
+                .overlay(alignment: .top) { insertionLine(at: index) }
+                .overlay(alignment: .bottom) {
+                    // Only the last row can host the trailing slot; every other
+                    // one is already some row's leading slot.
+                    if index == selected.count - 1 {
+                        insertionLine(at: selected.count)
+                    }
+                }
+            }
+            ForEach(store.unselectedCalendars) { cal in
+                CalendarPickerRow(store: store, calendar: cal, onDrag: nil)
+            }
+        }
+        // One target for the whole list rather than one per row: the spacing
+        // between rows belongs to no row, so per-row targets left dead strips
+        // where the indicator vanished and a drop was silently rejected.
+        .onDrop(of: [.text], delegate: CalendarListDropDelegate(
+            slotCount: selected.count,
+            rowHeight: rowHeight,
+            rowSpacing: Self.rowSpacing,
+            indicator: indicator,
+            onDrop: moveCalendar(withID:to:)))
+    }
+
+    /// The bar marking where a dropped calendar would land, drawn only for the
+    /// slot the pointer is currently over.
+    @ViewBuilder
+    private func insertionLine(at slot: Int) -> some View {
+        if indicator.slot == slot {
+            Rectangle()
+                .fill(Color.accentColor)
+                .frame(height: 2)
+                .padding(.horizontal, 10)
+        }
+    }
+
+    /// Applies a completed drop. The dragged item carries a calendar identifier;
+    /// anything else (a stray text drag from another app) matches nothing and is
+    /// ignored.
+    private func moveCalendar(withID id: String, to slot: Int) {
+        guard let dragged = store.selectedCalendars.first(where: { $0.id == id }) else { return }
+        store.moveCalendar(dragged, to: slot)
+    }
+}
+
 private struct CalendarPickerRow: View {
     @ObservedObject var store: DashboardStore
     let calendar: CalendarInfo
+    /// Supplies the drag payload for selected calendars, which can be reordered.
+    /// Nil for unselected ones, which have no place in the priority order.
+    var onDrag: (() -> NSItemProvider)?
 
-    private var isSubtractive: Bool { store.isCalendarSubtractive(calendar) }
     private var isWholeSegment: Bool { store.isCalendarWholeSegment(calendar) }
     private var isIncluded: Bool { store.isCalendarSelected(calendar) }
 
     var body: some View {
         HStack(spacing: 8) {
+            dragHandle
+
             Toggle(isOn: Binding(
                 get: { store.isCalendarSelected(calendar) },
                 set: { store.setCalendar(calendar, included: $0) }
@@ -988,22 +1059,150 @@ private struct CalendarPickerRow: View {
                     + "break it out into individual task segments."
                   : "Segment by task (default): this calendar's tasks each show as "
                     + "their own segment. Click to collapse it into one segment.")
-
-            Button {
-                store.setSubtractive(calendar, subtractive: !isSubtractive)
-            } label: {
-                Image(systemName: isSubtractive ? "minus.circle.fill" : "minus.circle")
-                    .foregroundStyle(isSubtractive ? Color.accentColor : Color.secondary)
-            }
-            .buttonStyle(.borderless)
-            .toolTip(isSubtractive
-                  ? "Subtractive: this calendar's time is removed from overlapping "
-                    + "events in other calendars. Click to turn off."
-                  : "Mark subtractive: remove this calendar's time from overlapping "
-                    + "events in other calendars (also includes it).")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 3)
+    }
+
+    /// The reorder grip, or — for unselected calendars — an equal-width gap that
+    /// keeps every row's checkbox on the same vertical line.
+    @ViewBuilder
+    private var dragHandle: some View {
+        if let onDrag {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.secondary)
+                .frame(width: 11)
+                .onDrag(onDrag) {
+                    HStack(spacing: 8) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color(hex: calendar.colorHex) ?? .secondary)
+                            .frame(width: 12, height: 12)
+                        Text(calendar.title).lineLimit(1)
+                    }
+                    .padding(6)
+                }
+                .toolTip("Drag to reorder priority. When events overlap, the "
+                         + "calendar higher in the list counts in full and the "
+                         + "overlap is removed from the one below it.")
+        } else {
+            Color.clear.frame(width: 11, height: 1)
+        }
+    }
+}
+
+/// Drag-to-reorder over the whole calendar list: maps the pointer to the slot a
+/// drop would insert into and commits the move there.
+private struct CalendarListDropDelegate: DropDelegate {
+    /// Number of draggable (selected) rows; slots run `0...slotCount`.
+    let slotCount: Int
+    let rowHeight: CGFloat
+    let rowSpacing: CGFloat
+    let indicator: DropIndicator
+    let onDrop: (String, Int) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.text])
+    }
+
+    func dropEntered(info: DropInfo) {
+        indicator.update(to: slot(for: info))
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        indicator.update(to: slot(for: info))
+        // `.copy`, not `.move`: nothing is removed from a source here, and the
+        // move operation asks the drag session for semantics a plain string
+        // payload can't honor.
+        return DropProposal(operation: .copy)
+    }
+
+    func dropExited(info: DropInfo) {
+        indicator.clear()
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let target = slot(for: info)
+        indicator.clear()
+        guard let provider = info.itemProviders(for: [.text]).first else { return false }
+        // The payload loads asynchronously, so the move hops back to the main
+        // actor before touching the store.
+        provider.loadObject(ofClass: NSString.self) { identifier, _ in
+            guard let identifier = identifier as? String else { return }
+            DispatchQueue.main.async { onDrop(identifier, target) }
+        }
+        return true
+    }
+
+    /// The slot the pointer is in: one past every row whose midpoint it has
+    /// passed. Because this measures against midpoints rather than row bounds,
+    /// every y maps to a slot — the gaps between rows included — and dragging
+    /// past the last selected row parks the drop at the end of the order.
+    private func slot(for info: DropInfo) -> Int {
+        let stride = rowHeight + rowSpacing
+        guard slotCount > 0, stride > 0 else { return 0 }
+        let passed = ((info.location.y - rowHeight / 2) / stride).rounded(.down)
+        return min(max(Int(passed) + 1, 0), slotCount)
+    }
+}
+
+/// Where a drag would drop a calendar, held for the insertion indicator.
+///
+/// A reference type rather than `@State` on purpose. As `@State`, the value
+/// cleared in `performDrop` came back a few hundred milliseconds later — once
+/// the re-extraction that the reorder kicked off published and SwiftUI re-ran
+/// the list from a stale snapshot — stranding the indicator at the drop point
+/// until the next drag. Nothing wrote that value; it was restored.
+///
+/// The mouse button is treated as the end-of-drag signal for the same reason of
+/// trust: SwiftUI delivered `dropExited` twice across 27 instrumented drags, so
+/// a drag that leaves the list without dropping cannot rely on it either. No
+/// drag is in flight once the button is up.
+@MainActor
+final class DropIndicator: ObservableObject {
+    @Published private(set) var slot: Int?
+
+    /// Runs only while the indicator is showing, to notice the button coming up.
+    /// The drag-ending mouse-up never reaches an event monitor — AppKit consumes
+    /// it — so polling is the only way to see the drag finish.
+    private var poll: Timer?
+
+    private var isDragging: Bool { NSEvent.pressedMouseButtons & 1 != 0 }
+
+    /// Points the indicator at `slot`. An update arriving with the button
+    /// already up belongs to a drag that has ended, and retires it instead.
+    func update(to slot: Int?) {
+        guard isDragging else { return clear() }
+        if self.slot != slot { self.slot = slot }
+        guard poll == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { return timer.invalidate() }
+                if !self.isDragging { self.clear() }
+            }
+        }
+        // `.common`, so it keeps ticking while AppKit is tracking the drag.
+        RunLoop.main.add(timer, forMode: .common)
+        poll = timer
+    }
+
+    func clear() {
+        if slot != nil { slot = nil }
+        poll?.invalidate()
+        poll = nil
+    }
+}
+
+private extension View {
+    /// Publishes this view's rendered height, for callers that need to reason
+    /// about where inside it a pointer landed.
+    func measureRowHeight(into height: Binding<CGFloat>) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { height.wrappedValue = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, new in height.wrappedValue = new }
+            }
+        )
     }
 }
 

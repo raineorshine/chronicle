@@ -35,9 +35,12 @@ public struct EventInput {
     public let isAllDay: Bool
     /// The source calendar's display color as `#RRGGBB`, if known.
     public let calendarColor: String?
-    /// When true, this event belongs to a *subtractive* calendar: its overlap is
-    /// removed from every non-subtractive event, while its own time counts fully.
-    public let isSubtractive: Bool
+    /// Priority rank of this event's calendar: `0` is the highest-priority
+    /// calendar, and larger numbers rank lower. Where events of different ranks
+    /// overlap, the higher-priority one counts in full and the overlap is removed
+    /// from the lower-priority one. Events sharing a rank never subtract from
+    /// each other, so `Int.max` (the default) means "subtracts from nothing".
+    public let calendarRank: Int
 
     public init(calendar: NormalizedName,
                 title: ParsedTitle,
@@ -45,14 +48,14 @@ public struct EventInput {
                 end: Date,
                 isAllDay: Bool,
                 calendarColor: String? = nil,
-                isSubtractive: Bool = false) {
+                calendarRank: Int = Int.max) {
         self.calendar = calendar
         self.title = title
         self.start = start
         self.end = end
         self.isAllDay = isAllDay
         self.calendarColor = calendarColor
-        self.isSubtractive = isSubtractive
+        self.calendarRank = calendarRank
     }
 }
 

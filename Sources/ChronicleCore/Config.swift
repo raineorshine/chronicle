@@ -2,8 +2,13 @@ import Foundation
 
 /// User configuration, persisted as JSON at `ChroniclePaths.configURL`.
 public struct ChronicleConfig: Codable, Equatable {
-    /// Calendar display names (as shown in Apple Calendar) to include.
-    /// Only events from these calendars are extracted. Empty means "none".
+    /// Calendar display names (as shown in Apple Calendar) to include, in
+    /// **priority order**: the first entry outranks the second, and so on. Only
+    /// events from these calendars are extracted. Empty means "none".
+    ///
+    /// Priority resolves overlaps. When events from two calendars overlap, the
+    /// higher-priority one counts in full and the overlapping portion is removed
+    /// from the lower-priority one (see `DateAggregator`).
     public var calendarAllowlist: [String]
 
     /// Substrings treated as Task/Subtask separators. A title is split on the
@@ -11,12 +16,6 @@ public struct ChronicleConfig: Codable, Equatable {
     /// `" | "`, and `" / "`; the surrounding spaces keep ordinary hyphenated
     /// words and paths like `a/b` intact.
     public var subtaskSeparators: [String]
-
-    /// Calendar display names (as shown in Apple Calendar) treated as
-    /// *subtractive*: their overlap is removed from events in other calendars,
-    /// while their own time is still counted in full. Matched case-insensitively.
-    /// A subtractive calendar is always extracted, even if not in the allowlist.
-    public var subtractiveCalendars: [String]
 
     /// Calendar display names (as shown in Apple Calendar) that render as a
     /// single whole-calendar segment at the top level, instead of breaking out
@@ -54,7 +53,6 @@ public struct ChronicleConfig: Codable, Equatable {
 
     public init(calendarAllowlist: [String] = [],
                 subtaskSeparators: [String] = [" - ", " | ", " / "],
-                subtractiveCalendars: [String] = [],
                 wholeCalendarSegments: [String] = [],
                 windowPastDays: Int = 60,
                 windowFutureDays: Int = 14,
@@ -63,7 +61,6 @@ public struct ChronicleConfig: Codable, Equatable {
                 weeklyMetricsCutoff: Int = 6) {
         self.calendarAllowlist = calendarAllowlist
         self.subtaskSeparators = subtaskSeparators
-        self.subtractiveCalendars = subtractiveCalendars
         self.wholeCalendarSegments = wholeCalendarSegments
         self.windowPastDays = windowPastDays
         self.windowFutureDays = windowFutureDays
@@ -75,12 +72,12 @@ public struct ChronicleConfig: Codable, Equatable {
     public static let `default` = ChronicleConfig()
 
     private enum CodingKeys: String, CodingKey {
-        case calendarAllowlist, subtaskSeparators, subtractiveCalendars
+        case calendarAllowlist, subtaskSeparators
         case wholeCalendarSegments, windowPastDays, windowFutureDays, taskColors
         case aliasChains
         case weeklyMetricsCutoff
-        // Legacy single-separator key, decoded for migration only.
-        case subtaskSeparator
+        // Legacy keys, decoded for migration only.
+        case subtaskSeparator, subtractiveCalendars
     }
 
     /// Tolerant decoding so configs written by older versions (which lack the
@@ -88,7 +85,14 @@ public struct ChronicleConfig: Codable, Equatable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = ChronicleConfig.default
-        calendarAllowlist = try c.decodeIfPresent([String].self, forKey: .calendarAllowlist) ?? d.calendarAllowlist
+        // Migrate legacy `subtractiveCalendars` into the priority order: a
+        // subtractive calendar outranked every other one, which the ordered
+        // allowlist expresses by putting it first. (Legacy subtractive calendars
+        // did not subtract from each other; ordered they do, which only shows up
+        // when two of them overlap.)
+        let allowlist = try c.decodeIfPresent([String].self, forKey: .calendarAllowlist) ?? d.calendarAllowlist
+        let legacySubtractive = try c.decodeIfPresent([String].self, forKey: .subtractiveCalendars) ?? []
+        calendarAllowlist = ChronicleConfig.ordered(allowlist, promoting: legacySubtractive)
         // Prefer the new list; migrate a legacy single separator; else default.
         if let separators = try c.decodeIfPresent([String].self, forKey: .subtaskSeparators) {
             subtaskSeparators = separators
@@ -97,7 +101,6 @@ public struct ChronicleConfig: Codable, Equatable {
         } else {
             subtaskSeparators = d.subtaskSeparators
         }
-        subtractiveCalendars = try c.decodeIfPresent([String].self, forKey: .subtractiveCalendars) ?? d.subtractiveCalendars
         wholeCalendarSegments = try c.decodeIfPresent([String].self, forKey: .wholeCalendarSegments) ?? d.wholeCalendarSegments
         windowPastDays = try c.decodeIfPresent(Int.self, forKey: .windowPastDays) ?? d.windowPastDays
         windowFutureDays = try c.decodeIfPresent(Int.self, forKey: .windowFutureDays) ?? d.windowFutureDays
@@ -106,13 +109,22 @@ public struct ChronicleConfig: Codable, Equatable {
         weeklyMetricsCutoff = try c.decodeIfPresent(Int.self, forKey: .weeklyMetricsCutoff) ?? d.weeklyMetricsCutoff
     }
 
-    /// Custom encoder that omits the legacy `subtaskSeparator` key, writing only
-    /// the current `subtaskSeparators` list.
+    /// `allowlist` with `promoted` moved to the front, preserving the order
+    /// within each group and dropping case-insensitive duplicates.
+    private static func ordered(_ allowlist: [String], promoting promoted: [String]) -> [String] {
+        guard !promoted.isEmpty else { return allowlist }
+        var seen: Set<String> = []
+        return (promoted + allowlist).filter {
+            seen.insert(CalendarSelection.normalize($0)).inserted
+        }
+    }
+
+    /// Custom encoder that omits the legacy `subtaskSeparator` and
+    /// `subtractiveCalendars` keys, writing only the fields in use today.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(calendarAllowlist, forKey: .calendarAllowlist)
         try c.encode(subtaskSeparators, forKey: .subtaskSeparators)
-        try c.encode(subtractiveCalendars, forKey: .subtractiveCalendars)
         try c.encode(wholeCalendarSegments, forKey: .wholeCalendarSegments)
         try c.encode(windowPastDays, forKey: .windowPastDays)
         try c.encode(windowFutureDays, forKey: .windowFutureDays)

@@ -74,8 +74,8 @@ public final class CalendarExtractor {
         let bounds = window.dateBounds(calendar: calendar)
 
         let all = store.calendars(for: .event)
-        let subtractive = Set(config.subtractiveCalendars.map(CalendarSelection.normalize))
         let included = CalendarSelection.included(from: all, config: config)
+        let ranks = CalendarSelection.ranks(config: config)
 
         var inputs: [EventInput] = []
         if !included.isEmpty {
@@ -87,15 +87,14 @@ public final class CalendarExtractor {
                 guard let start = event.startDate, let end = event.endDate else { continue }
                 guard let parsed = TitleParser.parse(event.title ?? "",
                                                      separators: config.subtaskSeparators) else { continue }
-                let isSubtractive = subtractive.contains(
-                    CalendarSelection.normalize(event.calendar.title))
+                let rank = ranks[CalendarSelection.normalize(event.calendar.title)] ?? Int.max
                 inputs.append(EventInput(calendar: TitleParser.normalize(event.calendar.title),
                                          title: parsed,
                                          start: start,
                                          end: end,
                                          isAllDay: false,
                                          calendarColor: Self.hexString(from: event.calendar.cgColor),
-                                         isSubtractive: isSubtractive))
+                                         calendarRank: rank))
             }
         }
 
