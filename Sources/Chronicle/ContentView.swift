@@ -22,10 +22,14 @@ struct ContentView: View {
             DashboardDetail(store: store)
         }
         .onAppear { store.load() }
-        // One sheet for every surface that can start a rename, so a row doesn't
-        // have to own presentation state that dies with it when the list reloads.
+        // One sheet per action for every surface that can start it, so a row
+        // doesn't have to own presentation state that dies with it when the
+        // list reloads.
         .sheet(item: $store.renameTarget) { target in
             RenameTaskSheet(store: store, target: target)
+        }
+        .sheet(item: $store.replaceTarget) { target in
+            ReplaceTaskSheet(store: store, target: target)
         }
         .onChange(of: scenePhase) { _, phase in
             // Re-check when returning to the app (e.g. after granting access in
@@ -72,6 +76,10 @@ private struct TaskMenuItems: View {
             store.beginRename(taskKey: taskKey, subtaskKey: subtaskKey)
         }
         .disabled(store.isRenaming || store.isRefreshing)
+        Button(subtaskKey == nil ? "Replace task…" : "Replace subtask…") {
+            store.beginReplace(taskKey: taskKey, subtaskKey: subtaskKey)
+        }
+        .disabled(store.isReplacing || store.isRefreshing)
         CategorizeMenu(store: store, taskKey: taskKey, subtaskKey: subtaskKey)
     }
 }
@@ -437,7 +445,6 @@ private struct RowHoverBackground: View {
 
 private struct DashboardDetail: View {
     @ObservedObject var store: DashboardStore
-    @State private var isShowingReplaceSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -508,23 +515,6 @@ private struct DashboardDetail: View {
                         .contextMenu {
                             Button("Copy task name") { copyToPasteboard(selectionTitle) }
                         }
-                    if let scope = replaceableScope {
-                        Button {
-                            isShowingReplaceSheet = true
-                        } label: {
-                            Label("Replace…", systemImage: "arrow.left.arrow.right")
-                        }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .disabled(store.isReplacing || store.isRefreshing)
-                        .help("Replace this title on every future event, from today onward")
-                        .sheet(isPresented: $isShowingReplaceSheet) {
-                            ReplaceTaskSheet(store: store,
-                                             taskKey: scope.taskKey,
-                                             subtaskKey: scope.subtaskKey,
-                                             currentTitle: store.currentEventTitle)
-                        }
-                    }
                 }
                 Text(store.isTaskLevel ? "Hours per activity by week"
                                        : "Subtask breakdown by week")
@@ -539,14 +529,6 @@ private struct DashboardDetail: View {
 
     private var showsBackButton: Bool {
         store.selectedNodeID != "all"
-    }
-
-    /// The task (and optionally subtask) whose page is showing, or nil at the
-    /// "All Tasks" scope, which spans too many distinct titles to replace.
-    /// A subtask scope replaces only that subtask's events.
-    private var replaceableScope: (taskKey: String, subtaskKey: String?)? {
-        guard let taskKey = store.selection.taskKey else { return nil }
-        return (taskKey, store.selection.subtaskKey)
     }
 
     private var selectionTitle: String {
@@ -584,10 +566,7 @@ private struct DashboardDetail: View {
 /// is gated behind an explicit step that spells out its scope first.
 private struct ReplaceTaskSheet: View {
     @ObservedObject var store: DashboardStore
-    let taskKey: String
-    /// When set, only this subtask's events are replaced.
-    let subtaskKey: String?
-    let currentTitle: String
+    let target: RetitleTarget
     @Environment(\.dismiss) private var dismiss
     @State private var newTitle = ""
 
@@ -595,7 +574,7 @@ private struct ReplaceTaskSheet: View {
         let trimmed = newTitle.trimmingCharacters(in: .whitespaces)
         // A known-empty count means there is nothing to rewrite. An unknown one
         // (still counting, or the count failed) must not block the action.
-        return !trimmed.isEmpty && trimmed != currentTitle
+        return !trimmed.isEmpty && trimmed != target.currentTitle
             && store.replacementPreview?.totalReplaced != 0
     }
 
@@ -605,8 +584,8 @@ private struct ReplaceTaskSheet: View {
     /// where a recurring series counts once rather than once per occurrence.
     private var scopeExplanation: String {
         guard let preview = store.replacementPreview else {
-            let quoted = "\u{201C}\(currentTitle)\u{201D}"
-            let scope = subtaskKey == nil
+            let quoted = "\u{201C}\(target.currentTitle)\u{201D}"
+            let scope = target.subtaskKey == nil
                 ? "every future event under \(quoted), including its subtasks,"
                 : "every future event titled \(quoted)"
             return "Replaces the title of \(scope) from today onward in your calendar. "
@@ -630,16 +609,16 @@ private struct ReplaceTaskSheet: View {
 
     private func replace() {
         guard canReplace else { return }
-        store.replaceRecurringTask(taskKey: taskKey,
-                                   subtaskKey: subtaskKey,
+        store.replaceRecurringTask(taskKey: target.taskKey,
+                                   subtaskKey: target.subtaskKey,
                                    newTitle: newTitle)
         dismiss()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(subtaskKey == nil ? "Replace Recurring Task"
-                                   : "Replace Recurring Subtask")
+            Text(target.subtaskKey == nil ? "Replace Recurring Task"
+                                          : "Replace Recurring Subtask")
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -671,8 +650,9 @@ private struct ReplaceTaskSheet: View {
         .padding(20)
         .frame(width: 380)
         .onAppear {
-            newTitle = currentTitle
-            store.loadReplacementPreview(taskKey: taskKey, subtaskKey: subtaskKey)
+            newTitle = target.currentTitle
+            store.loadReplacementPreview(taskKey: target.taskKey,
+                                         subtaskKey: target.subtaskKey)
         }
     }
 }
@@ -690,7 +670,7 @@ private struct ReplaceTaskSheet: View {
 /// step that spells out its scope first.
 private struct RenameTaskSheet: View {
     @ObservedObject var store: DashboardStore
-    let target: RenameTarget
+    let target: RetitleTarget
     @Environment(\.dismiss) private var dismiss
     @State private var newTitle = ""
 
