@@ -7,6 +7,7 @@
 # (or another worktree's build).
 #
 # Pass --no-launch to build (and sign) without launching.
+# Pass --reset-permissions to force-clear the Calendar permission (see below).
 #
 set -euo pipefail
 
@@ -17,8 +18,34 @@ BUILT_APP="$DERIVED/Build/Products/Debug/Chronicle.app"
 BUNDLE_ID="com.chronicle.app"
 
 LAUNCH=true
-if [[ "${1:-}" == "--no-launch" ]]; then
-	LAUNCH=false
+FORCE_RESET_TCC=false
+for arg in "$@"; do
+	case "$arg" in
+		--no-launch) LAUNCH=false ;;
+		--reset-permissions) FORCE_RESET_TCC=true ;;
+		*) echo "error: unknown option: $arg" >&2; exit 1 ;;
+	esac
+done
+
+# A stable code-signing identity keeps the Calendar permission working across
+# rebuilds. Ad-hoc signatures (Xcode's default without a Developer account)
+# change every build, which invalidates the macOS TCC grant. Moving an app from
+# ad-hoc to the stable identity below therefore needs its stale, cdhash-pinned
+# grant cleared once — after that the stable identity's grant persists.
+#
+# Inspect the app left behind by the PREVIOUS run, *before* xcodebuild
+# overwrites it: that copy still carries the signature this script last applied.
+# Checking after the build instead would see ad-hoc nearly every time, because
+# xcodebuild re-signs that way whenever it relinks, and would then reset the
+# permission on most rebuilds rather than once.
+#
+# If the previous build is gone (a wiped .build-xcode, a fresh worktree) there
+# is nothing to infer from, so leave the permission alone; --reset-permissions
+# clears it by hand if a stale grant does turn out to be in the way.
+RESET_TCC=$FORCE_RESET_TCC
+if [[ "$RESET_TCC" == false && -d "$BUILT_APP" ]] \
+	&& codesign -dvv "$BUILT_APP" 2>&1 | grep -q "Signature=adhoc"; then
+	RESET_TCC=true
 fi
 
 echo "==> Generating Xcode project…"
@@ -48,16 +75,6 @@ if [[ ! -d "$BUILT_APP" ]]; then
 	exit 1
 fi
 
-# A stable code-signing identity keeps the Calendar permission working across
-# rebuilds. Ad-hoc signatures (Xcode's default without a Developer account)
-# change every build, which invalidates the macOS TCC grant. If the built app is
-# currently ad-hoc signed, its stale grant is pinned to a throwaway hash and must
-# be cleared once, after which the stable identity's grant persists.
-RESET_TCC=false
-if codesign -dvv "$BUILT_APP" 2>&1 | grep -q "Signature=adhoc"; then
-	RESET_TCC=true
-fi
-
 echo "==> Ensuring a stable code-signing identity…"
 SIGN_IDENTITY="$("$SCRIPT_DIR/create-signing-cert.sh")"
 
@@ -68,7 +85,12 @@ codesign --force --options runtime \
 codesign --verify --strict "$BUILT_APP"
 
 if [[ "$RESET_TCC" == true ]]; then
-	echo "==> Clearing the stale ad-hoc Calendar permission (one-time)…"
+	# tccutil's finest granularity is the bundle ID, and this build shares it
+	# with the installed /Applications/Chronicle.app — so both lose Calendar
+	# access here. Say so, rather than letting it look like a local-only reset.
+	echo "==> Clearing the stale ad-hoc Calendar permission for $BUNDLE_ID…"
+	echo "    Also clears it for the installed Chronicle.app (same bundle ID)."
+	echo "    Re-grant in either app: Refresh in the toolbar → Allow."
 	tccutil reset Calendar "$BUNDLE_ID" >/dev/null 2>&1 || true
 fi
 
