@@ -14,19 +14,25 @@ public struct ReplacementCandidate: Equatable {
     /// `EKEvent.calendar.allowsContentModifications`.
     public let allowsModification: Bool
     public let occurrenceStart: Date
+    /// How the series repeats, for describing a rename's scope. Nil for a
+    /// one-off, and for a series whose cadence has no plain name (one repeating
+    /// every *n* periods), which is then described only as repeating.
+    public let frequency: ScheduleFrequency?
 
     public init(occurrenceID: String,
                 rawTitle: String,
                 isAllDay: Bool,
                 isRecurring: Bool,
                 allowsModification: Bool,
-                occurrenceStart: Date) {
+                occurrenceStart: Date,
+                frequency: ScheduleFrequency? = nil) {
         self.occurrenceID = occurrenceID
         self.rawTitle = rawTitle
         self.isAllDay = isAllDay
         self.isRecurring = isRecurring
         self.allowsModification = allowsModification
         self.occurrenceStart = occurrenceStart
+        self.frequency = frequency
     }
 }
 
@@ -356,27 +362,10 @@ public final class TaskReplacer {
         let start = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: futureHorizonDays, to: start) ?? start
 
-        let included = CalendarSelection.included(from: store.calendars(for: .event),
-                                                  config: config)
-        guard !included.isEmpty else {
-            return ([], ReplacementPlan(ops: [], skippedReadOnly: 0))
-        }
-
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: included)
-        let events = store.events(matching: predicate)
-
-        let candidates = events.enumerated().map { index, event in
-            let identifier = event.eventIdentifier ?? ""
-            return ReplacementCandidate(
-                // Fall back to a per-row identity so events without an identifier
-                // can never be collapsed into one another by the series dedupe.
-                occurrenceID: identifier.isEmpty ? "index:\(index)" : identifier,
-                rawTitle: event.title ?? "",
-                isAllDay: event.isAllDay,
-                isRecurring: event.hasRecurrenceRules,
-                allowsModification: event.calendar.allowsContentModifications,
-                occurrenceStart: event.startDate ?? .distantFuture)
-        }
+        let (events, candidates) = TaskEventQuery.fetch(store: store,
+                                                        config: config,
+                                                        start: start,
+                                                        end: end)
 
         let plan = TaskReplacementPlanner.plan(candidates: candidates,
                                                targetTaskKey: targetTaskKey,

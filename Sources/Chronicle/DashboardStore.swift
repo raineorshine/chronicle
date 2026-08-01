@@ -77,6 +77,17 @@ final class DashboardStore: ObservableObject {
     /// user has left cannot overwrite the current count.
     private var replacementPreviewToken = 0
 
+    /// The scope the rename sheet is open on, or nil when it is closed. Held on
+    /// the store rather than in a row's `@State` so a single sheet serves every
+    /// surface that can start a rename (each sidebar row, the header, …).
+    @Published var renameTarget: RenameTarget?
+    /// True while a rename is being written to Calendar.
+    @Published var isRenaming = false
+    /// Where the count for the rename the sheet is offering stands.
+    @Published var renamePreviewState: RenamePreviewState = .counting
+    /// Identifies the in-flight rename preview, mirroring `replacementPreviewToken`.
+    private var renamePreviewToken = 0
+
     /// The tasks and subtasks that still have a recurring event scheduled ahead
     /// of now, marked as such in the sidebar. Read from EventKit alongside a
     /// load, so it is empty until the first scan lands (and while access is
@@ -863,6 +874,96 @@ final class DashboardStore: ObservableObject {
         return (alias.toTaskKey, alias.toSubtaskKey)
     }
 
+    // MARK: - Rename a task
+
+    /// Opens the rename sheet on a task (or one of its subtasks), seeded with
+    /// the title its events currently carry.
+    func beginRename(taskKey: String, subtaskKey: String? = nil) {
+        renamePreviewState = .counting
+        renameTarget = RenameTarget(taskKey: taskKey,
+                                    subtaskKey: subtaskKey,
+                                    currentTitle: eventTitle(taskKey: taskKey,
+                                                             subtaskKey: subtaskKey))
+    }
+
+    /// Counts the events a rename of this scope would retitle, so the sheet can
+    /// state the blast radius before the user commits to it.
+    ///
+    /// Missing Calendar access is reported as its own state because it blocks
+    /// the rename itself, not just the count. Any other failure leaves the count
+    /// merely unavailable: it is advisory, and `renameTask` reports the error
+    /// properly if the user goes ahead anyway.
+    func loadRenamePreview(taskKey: String, subtaskKey: String? = nil) {
+        renamePreviewState = .counting
+        renamePreviewToken += 1
+        let token = renamePreviewToken
+        Task {
+            let state: RenamePreviewState = await Task.detached {
+                guard let config = try? ChronicleConfig.load() else { return .unavailable }
+                do {
+                    return .counted(try TaskRenamer().preview(targetTaskKey: taskKey,
+                                                              targetSubtaskKey: subtaskKey,
+                                                              config: config))
+                } catch RenameError.accessDenied {
+                    return .needsCalendarAccess
+                } catch {
+                    return .unavailable
+                }
+            }.value
+            await MainActor.run {
+                // Drop a result the sheet has already moved on from.
+                guard token == self.renamePreviewToken else { return }
+                self.renamePreviewState = state
+            }
+        }
+    }
+
+    /// Retitles every Calendar event mapping to `taskKey`, past and future
+    /// alike, then re-extracts so the dashboard reflects the change.
+    ///
+    /// Unlike a replacement, this leaves nothing behind under the old title: a
+    /// recurring series is retitled across all of its occurrences rather than
+    /// split at today, so the activity's history moves over with it and needs no
+    /// alias to stay in one piece.
+    ///
+    /// Like a replacement, it writes to the user's actual calendar and cannot be
+    /// undone, so it is only reached from an explicit confirmation in the UI.
+    func renameTask(taskKey: String, subtaskKey: String? = nil, newTitle: String) {
+        let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, !isRenaming, !isRefreshing else { return }
+        isRenaming = true
+        errorMessage = nil
+        Task {
+            do {
+                let config = try ChronicleConfig.load()
+                let extractor = CalendarExtractor()
+                try await extractor.requestAccess()
+                let summary = try TaskRenamer().rename(targetTaskKey: taskKey,
+                                                       targetSubtaskKey: subtaskKey,
+                                                       newTitle: title,
+                                                       config: config)
+                await MainActor.run {
+                    self.isRenaming = false
+                    guard summary.totalRenamed > 0 else {
+                        self.errorMessage = summary.skippedReadOnly > 0
+                            ? "Nothing was renamed: the \(summary.skippedReadOnly) matching "
+                                + "event(s) are on a calendar that doesn't allow edits."
+                            : "No events matching this selection were found to rename."
+                        return
+                    }
+                    // Re-extract so the dashboard picks up the new title, then
+                    // follow the selection over to the renamed activity.
+                    self.refresh { self.selectReplacedScope(newTitle: title) }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isRenaming = false
+                    self.errorMessage = "\(error)"
+                }
+            }
+        }
+    }
+
     // MARK: - Selection
 
     /// A human-readable path for the current selection, derived from labels.
@@ -886,10 +987,17 @@ final class DashboardStore: ObservableObject {
     /// `currentTitle`, whose ` / ` join is display-only).
     var currentEventTitle: String {
         guard let taskKey = selection.taskKey else { return "" }
+        return eventTitle(taskKey: taskKey, subtaskKey: selection.subtaskKey)
+    }
+
+    /// A scope written the way a calendar event titles it — `Task` or
+    /// `Task - Subtask`, using the first configured separator. Seeds the replace
+    /// and rename sheets, where the value becomes a real event title.
+    func eventTitle(taskKey: String, subtaskKey: String? = nil) -> String {
         let task = taskList.first { $0.key == taskKey }
         let taskLabel = task?.label ?? ""
-        guard let subKey = selection.subtaskKey,
-              let sub = task?.subtasks.first(where: { $0.key == subKey }) else {
+        guard let subtaskKey,
+              let sub = task?.subtasks.first(where: { $0.key == subtaskKey }) else {
             return taskLabel
         }
         return taskLabel + (subtaskSeparators.first ?? " - ") + sub.label
@@ -1318,4 +1426,35 @@ final class DashboardStore: ObservableObject {
             }
         }
     }
+}
+
+/// Where the rename sheet's count stands. Distinguishes "no Calendar access" —
+/// which blocks the rename itself — from a count that merely could not be taken,
+/// and both from the moment before the count has arrived, during which the sheet
+/// stays silent rather than claiming a scope it is about to restate.
+enum RenamePreviewState: Equatable, Sendable {
+    /// The calendar query is still running.
+    case counting
+    case counted(RenameSummary)
+    case needsCalendarAccess
+    /// The count could not be taken, though the rename may still be attempted.
+    case unavailable
+
+    var summary: RenameSummary? {
+        guard case .counted(let summary) = self else { return nil }
+        return summary
+    }
+}
+
+/// The scope a pending rename applies to. Drives a single `.sheet(item:)`, so
+/// any surface can start a rename by setting `DashboardStore.renameTarget`
+/// without owning presentation state of its own.
+struct RenameTarget: Identifiable, Equatable {
+    let taskKey: String
+    /// When set, only this subtask's events are renamed.
+    let subtaskKey: String?
+    /// The title the scope's events carry today, seeding the text field.
+    let currentTitle: String
+
+    var id: String { "\(taskKey)\u{1F}\(subtaskKey ?? "")" }
 }
