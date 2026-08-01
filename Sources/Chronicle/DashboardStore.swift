@@ -895,6 +895,29 @@ final class DashboardStore: ObservableObject {
     /// level or a calendar scope — as opposed to a subtask breakdown.
     var isTaskLevel: Bool { selection.taskKey == nil }
 
+    /// Whether a chart segment has a detail page of its own — an activity at the
+    /// top level, a subtask within an activity. The "Other" bucket, the
+    /// "(no subtask)" catch-all, and whole-calendar segments are aggregates with
+    /// nothing to open.
+    func hasDetailPage(forSegment key: String) -> Bool {
+        key != WeeklyBucketing.otherKey
+            && key != SegmentDailyPoint.noSubtaskKey
+            && !WeeklyBucketing.isCalendarBucketKey(key)
+    }
+
+    /// Opens the page for a chart segment: the activity's page at the top level,
+    /// or the subtask's page while an activity is scoped. No-op for segments
+    /// that have no page of their own.
+    func openDetail(segmentKey key: String) {
+        guard hasDetailPage(forSegment: key) else { return }
+        if let taskKey = selection.taskKey {
+            select(HierarchySelection(taskKey: taskKey, subtaskKey: key),
+                   nodeID: "sub:\(taskKey):\(key)")
+        } else {
+            select(HierarchySelection(taskKey: key), nodeID: "task:\(key)")
+        }
+    }
+
     /// Drills into an activity segment so the chart re-stacks it by subtask.
     /// No-op for the "Other" bucket, per-calendar buckets, or when already at
     /// subtask level. The segment key is the (calendar-agnostic) task key.

@@ -1223,14 +1223,7 @@ private struct WeeklyChartCard: View {
                         .onContinuousHover { phase in
                             switch phase {
                             case .active(let location):
-                                guard let plotAnchor = proxy.plotFrame else { return }
-                                let plot = geo[plotAnchor]
-                                let x = location.x - plot.origin.x
-                                let y = location.y - plot.origin.y
-                                if let date: Date = proxy.value(atX: x),
-                                   let week = store.nearestWeek(to: date),
-                                   let hours: Double = proxy.value(atY: y),
-                                   let seg = store.segment(inWeek: week, atHours: hours) {
+                                if let seg = segment(at: location, proxy: proxy, geo: geo) {
                                     hovered = seg
                                     hoverPoint = location
                                     store.setHighlight(seg.key)
@@ -1238,10 +1231,22 @@ private struct WeeklyChartCard: View {
                                     hovered = nil
                                     store.setHighlight(nil)
                                 }
+                                updateCursor(for: hovered)
                             case .ended:
                                 hovered = nil
                                 store.setHighlight(nil)
+                                NSCursor.arrow.set()
                             }
+                        }
+                        .onTapGesture { location in
+                            guard let seg = segment(at: location, proxy: proxy, geo: geo),
+                                  store.hasDetailPage(forSegment: seg.key) else { return }
+                            // The new scope re-stacks the chart under the
+                            // stationary cursor, so the old segment's tooltip and
+                            // highlight no longer describe what's beneath it.
+                            hovered = nil
+                            store.setHighlight(nil)
+                            store.openDetail(segmentKey: seg.key)
                         }
                     if let seg = hovered {
                         tooltip(for: seg)
@@ -1258,6 +1263,29 @@ private struct WeeklyChartCard: View {
                 }
             }
         }
+    }
+
+    /// Resolves the stacked segment drawn under a point in the overlay's
+    /// coordinate space. Nil when the point misses the plot, falls outside the
+    /// axis domains, or lands above the week's stack.
+    private func segment(at location: CGPoint,
+                         proxy: ChartProxy,
+                         geo: GeometryProxy) -> DashboardStore.HoveredSegment? {
+        guard let plotAnchor = proxy.plotFrame else { return nil }
+        let plot = geo[plotAnchor]
+        guard let date: Date = proxy.value(atX: location.x - plot.origin.x),
+              let week = store.nearestWeek(to: date),
+              let hours: Double = proxy.value(atY: location.y - plot.origin.y)
+        else { return nil }
+        return store.segment(inWeek: week, atHours: hours)
+    }
+
+    /// Shows a pointing-hand cursor over slices that open a page, so the chart
+    /// reads as clickable. Set on every hover event rather than once on entry
+    /// because AppKit resets the cursor as the pointer moves within the window.
+    private func updateCursor(for segment: DashboardStore.HoveredSegment?) {
+        let clickable = segment.map { store.hasDetailPage(forSegment: $0.key) } ?? false
+        (clickable ? NSCursor.pointingHand : NSCursor.arrow).set()
     }
 
     private static let axisLabelTextStyle = Font.caption2
