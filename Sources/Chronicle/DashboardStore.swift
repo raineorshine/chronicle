@@ -489,31 +489,39 @@ final class DashboardStore: ObservableObject {
         var id: String { key }
     }
 
+    /// A palette entry with a human-readable name, so the color context menu
+    /// and the swatch picker can label swatches ("Red", "Teal").
+    struct PaletteColor: Identifiable, Equatable {
+        let name: String
+        let color: Color
+        var id: String { name }
+    }
+
     /// A curated, Calendar-inspired palette (Apple Calendar's named colors, tuned
     /// for the app's dark theme, plus evenly-spaced in-between hues). Drives both
     /// auto-colors and the manual swatch picker, so assigned and hand-picked
     /// colors are drawn from the same set. The "Other" bucket is gray and is
     /// styled separately.
-    static let palette: [Color] = [
-        Color(hex: "#FF453A")!, // Red
-        Color(hex: "#FF6B3D")!, // Vermilion
-        Color(hex: "#FF9F0A")!, // Orange
-        Color(hex: "#FFBF00")!, // Amber
-        Color(hex: "#FFD60A")!, // Yellow
-        Color(hex: "#C0E030")!, // Lime
-        Color(hex: "#32D74B")!, // Green
-        Color(hex: "#30E0A1")!, // Mint
-        Color(hex: "#40C8E0")!, // Teal
-        Color(hex: "#64D2FF")!, // Cyan
-        Color(hex: "#0A84FF")!, // Blue
-        Color(hex: "#5E5CE6")!, // Indigo
-        Color(hex: "#7D7AFF")!, // Violet
-        Color(hex: "#BF5AF2")!, // Purple
-        Color(hex: "#E85AD1")!, // Magenta
-        Color(hex: "#FF375F")!, // Pink
-        Color(hex: "#FF6482")!, // Rose
-        Color(hex: "#AC8E68")!, // Brown
-        Color(hex: "#98989D")!, // Gray
+    static let palette: [PaletteColor] = [
+        PaletteColor(name: "Red", color: Color(hex: "#FF453A")!),
+        PaletteColor(name: "Vermilion", color: Color(hex: "#FF6B3D")!),
+        PaletteColor(name: "Orange", color: Color(hex: "#FF9F0A")!),
+        PaletteColor(name: "Amber", color: Color(hex: "#FFBF00")!),
+        PaletteColor(name: "Yellow", color: Color(hex: "#FFD60A")!),
+        PaletteColor(name: "Lime", color: Color(hex: "#C0E030")!),
+        PaletteColor(name: "Green", color: Color(hex: "#32D74B")!),
+        PaletteColor(name: "Mint", color: Color(hex: "#30E0A1")!),
+        PaletteColor(name: "Teal", color: Color(hex: "#40C8E0")!),
+        PaletteColor(name: "Cyan", color: Color(hex: "#64D2FF")!),
+        PaletteColor(name: "Blue", color: Color(hex: "#0A84FF")!),
+        PaletteColor(name: "Indigo", color: Color(hex: "#5E5CE6")!),
+        PaletteColor(name: "Violet", color: Color(hex: "#7D7AFF")!),
+        PaletteColor(name: "Purple", color: Color(hex: "#BF5AF2")!),
+        PaletteColor(name: "Magenta", color: Color(hex: "#E85AD1")!),
+        PaletteColor(name: "Pink", color: Color(hex: "#FF375F")!),
+        PaletteColor(name: "Rose", color: Color(hex: "#FF6482")!),
+        PaletteColor(name: "Brown", color: Color(hex: "#AC8E68")!),
+        PaletteColor(name: "Gray", color: Color(hex: "#98989D")!),
     ]
 
     /// A stable palette color derived deterministically from a segment key, so a
@@ -526,7 +534,7 @@ final class DashboardStore: ObservableObject {
             hash ^= UInt64(byte)
             hash = hash &* 0x100000001b3
         }
-        return palette[Int(hash % UInt64(palette.count))]
+        return palette[Int(hash % UInt64(palette.count))].color
     }
 
     /// The effective color for a task: its override if set, else its stable
@@ -1101,17 +1109,35 @@ final class DashboardStore: ObservableObject {
             && !WeeklyBucketing.isCalendarBucketKey(key)
     }
 
+    /// The task/subtask identity a chart segment stands for in the current
+    /// scope: an activity at the top level, a subtask while an activity is
+    /// scoped. Nil for aggregates (the "Other" bucket, the "(no subtask)"
+    /// catch-all, whole-calendar segments), which have no identity of their own.
+    func identity(forSegment key: String) -> (taskKey: String, subtaskKey: String?)? {
+        guard hasDetailPage(forSegment: key) else { return nil }
+        if let taskKey = selection.taskKey { return (taskKey, key) }
+        return (key, nil)
+    }
+
+    /// Opens a task or subtask page (or the "All Tasks" home), deriving the
+    /// sidebar node id from the selection.
+    func open(_ target: HierarchySelection) {
+        if let taskKey = target.taskKey, let subtaskKey = target.subtaskKey {
+            select(target, nodeID: "sub:\(taskKey):\(subtaskKey)")
+        } else if let taskKey = target.taskKey {
+            select(target, nodeID: "task:\(taskKey)")
+        } else {
+            select(.all, nodeID: "all")
+        }
+    }
+
     /// Opens the page for a chart segment: the activity's page at the top level,
     /// or the subtask's page while an activity is scoped. No-op for segments
     /// that have no page of their own.
     func openDetail(segmentKey key: String) {
-        guard hasDetailPage(forSegment: key) else { return }
-        if let taskKey = selection.taskKey {
-            select(HierarchySelection(taskKey: taskKey, subtaskKey: key),
-                   nodeID: "sub:\(taskKey):\(key)")
-        } else {
-            select(HierarchySelection(taskKey: key), nodeID: "task:\(key)")
-        }
+        guard let identity = identity(forSegment: key) else { return }
+        open(HierarchySelection(taskKey: identity.taskKey,
+                                subtaskKey: identity.subtaskKey))
     }
 
     /// Moves the scope up one level (subtask → task → all).
