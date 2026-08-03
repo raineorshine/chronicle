@@ -68,6 +68,10 @@ final class DashboardStore: ObservableObject {
     @Published var totals: RangeTotals = .zero
     @Published var errorMessage: String?
     @Published var isRefreshing = false
+    /// The scope the replace sheet is open on, or nil when it is closed. Held on
+    /// the store rather than in a row's `@State` so a single sheet serves every
+    /// surface that can start a replacement (each sidebar row, its swatch, …).
+    @Published var replaceTarget: RetitleTarget?
     /// True while a task replacement is being written to Calendar.
     @Published var isReplacing = false
     /// Predicted effect of the replacement the sheet is currently offering, or
@@ -79,8 +83,8 @@ final class DashboardStore: ObservableObject {
 
     /// The scope the rename sheet is open on, or nil when it is closed. Held on
     /// the store rather than in a row's `@State` so a single sheet serves every
-    /// surface that can start a rename (each sidebar row, the header, …).
-    @Published var renameTarget: RenameTarget?
+    /// surface that can start a rename (each sidebar row, its swatch, …).
+    @Published var renameTarget: RetitleTarget?
     /// True while a rename is being written to Calendar.
     @Published var isRenaming = false
     /// Where the count for the rename the sheet is offering stands.
@@ -709,6 +713,17 @@ final class DashboardStore: ObservableObject {
 
     // MARK: - Replace a recurring task
 
+    /// Opens the replace sheet on a task (or one of its subtasks), seeded with
+    /// the title its events currently carry. The stale count from a previous
+    /// scope is cleared up front so the sheet opens counting, not lying.
+    func beginReplace(taskKey: String, subtaskKey: String? = nil) {
+        replacementPreview = nil
+        replaceTarget = RetitleTarget(taskKey: taskKey,
+                                      subtaskKey: subtaskKey,
+                                      currentTitle: eventTitle(taskKey: taskKey,
+                                                               subtaskKey: subtaskKey))
+    }
+
     /// Counts the events a replacement of this scope would rewrite, so the sheet
     /// can state the blast radius before the user commits to it.
     ///
@@ -888,10 +903,10 @@ final class DashboardStore: ObservableObject {
     /// the title its events currently carry.
     func beginRename(taskKey: String, subtaskKey: String? = nil) {
         renamePreviewState = .counting
-        renameTarget = RenameTarget(taskKey: taskKey,
-                                    subtaskKey: subtaskKey,
-                                    currentTitle: eventTitle(taskKey: taskKey,
-                                                             subtaskKey: subtaskKey))
+        renameTarget = RetitleTarget(taskKey: taskKey,
+                                     subtaskKey: subtaskKey,
+                                     currentTitle: eventTitle(taskKey: taskKey,
+                                                              subtaskKey: subtaskKey))
     }
 
     /// Counts the events a rename of this scope would retitle, so the sheet can
@@ -987,15 +1002,6 @@ final class DashboardStore: ObservableObject {
             let sub = task?.subtasks.first { $0.key == subKey }
             return [task?.label, sub?.label].compactMap { $0 }.joined(separator: " / ")
         }
-    }
-
-    /// The current scope written the way a calendar event titles it — `Task` or
-    /// `Task - Subtask`, using the first configured separator. Seeds the
-    /// replacement sheet, where the value becomes a real event title (unlike
-    /// `currentTitle`, whose ` / ` join is display-only).
-    var currentEventTitle: String {
-        guard let taskKey = selection.taskKey else { return "" }
-        return eventTitle(taskKey: taskKey, subtaskKey: selection.subtaskKey)
     }
 
     /// A scope written the way a calendar event titles it — `Task` or
@@ -1472,12 +1478,13 @@ enum RenamePreviewState: Equatable, Sendable {
     }
 }
 
-/// The scope a pending rename applies to. Drives a single `.sheet(item:)`, so
-/// any surface can start a rename by setting `DashboardStore.renameTarget`
-/// without owning presentation state of its own.
-struct RenameTarget: Identifiable, Equatable {
+/// The scope a pending retitle — a rename or a replacement — applies to. Each
+/// action drives its own `.sheet(item:)`, so any surface can start one by
+/// setting `DashboardStore.renameTarget` or `.replaceTarget` without owning
+/// presentation state of its own.
+struct RetitleTarget: Identifiable, Equatable {
     let taskKey: String
-    /// When set, only this subtask's events are renamed.
+    /// When set, only this subtask's events are retitled.
     let subtaskKey: String?
     /// The title the scope's events carry today, seeding the text field.
     let currentTitle: String
