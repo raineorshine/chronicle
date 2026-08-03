@@ -51,6 +51,9 @@ private struct HierarchySidebar: View {
                           systemImage: "square.grid.2x2") {
                 store.select(.all, nodeID: "all")
             }
+            .contextMenu {
+                TaskMenuItems(store: store, openTarget: .all, displayName: "All Tasks")
+            }
 
             ForEach(store.taskList) { task in
                 TaskRow(store: store, task: task)
@@ -60,27 +63,111 @@ private struct HierarchySidebar: View {
     }
 }
 
-/// The context-menu items every sidebar row offers for the activity (or
-/// subtask) it names. Held in one place so the row and the color swatch nested
-/// inside it — whose own menu shadows the row's — stay in step.
+/// The one right-click menu for a task or subtask, shown identically wherever
+/// one appears: sidebar rows, the detail header, the summary lists, and chart
+/// slices. Items that don't apply to a target are disabled rather than
+/// dropped, so the menu keeps the same shape everywhere.
 private struct TaskMenuItems: View {
     @ObservedObject var store: DashboardStore
-    let taskKey: String
+    /// The page "Open" navigates to; nil when the target is an aggregate with
+    /// no page of its own, or the page already showing (the detail header).
+    var openTarget: HierarchySelection? = nil
+    /// The task (and optionally subtask) identity for rename/categorize/color;
+    /// nil for aggregates ("All Tasks", "Other", whole-calendar buckets).
+    var taskKey: String? = nil
     var subtaskKey: String? = nil
-    /// The row's visible name, which "Copy task name" copies verbatim.
+    /// The target's visible name, which "Copy task name" copies verbatim.
     let displayName: String
 
+    /// Color overrides are a task-level attribute, so the color items act only
+    /// on a task target — not on subtasks or aggregates.
+    private var colorKey: String? {
+        subtaskKey == nil ? taskKey : nil
+    }
+
     var body: some View {
+        Button("Open") {
+            if let openTarget { store.open(openTarget) }
+        }
+        .disabled(openTarget == nil)
         Button("Copy task name") { copyToPasteboard(displayName) }
+        Divider()
         Button(subtaskKey == nil ? "Rename task…" : "Rename subtask…") {
-            store.beginRename(taskKey: taskKey, subtaskKey: subtaskKey)
+            if let taskKey {
+                store.beginRename(taskKey: taskKey, subtaskKey: subtaskKey)
+            }
         }
-        .disabled(store.isRenaming || store.isRefreshing)
+        .disabled(taskKey == nil || store.isRenaming || store.isRefreshing)
         Button(subtaskKey == nil ? "Replace task…" : "Replace subtask…") {
-            store.beginReplace(taskKey: taskKey, subtaskKey: subtaskKey)
+            if let taskKey {
+                store.beginReplace(taskKey: taskKey, subtaskKey: subtaskKey)
+            }
         }
-        .disabled(store.isReplacing || store.isRefreshing)
+        .disabled(taskKey == nil || store.isReplacing || store.isRefreshing)
         CategorizeMenu(store: store, taskKey: taskKey, subtaskKey: subtaskKey)
+        Divider()
+        ColorMenu(store: store, taskKey: colorKey)
+        Button("Reset to Auto Color") {
+            if let colorKey { store.setTaskColor(colorKey, nil) }
+        }
+        .disabled(colorKey.flatMap { store.taskColors[$0] } == nil)
+    }
+}
+
+/// Submenu naming each palette color, with the effective choice checked the
+/// same way the swatch picker rings it. Disabled for targets whose color can't
+/// be overridden (subtasks and aggregates).
+private struct ColorMenu: View {
+    @ObservedObject var store: DashboardStore
+    /// The task whose override the menu edits; nil disables the submenu.
+    let taskKey: String?
+
+    var body: some View {
+        Menu("Color") {
+            if let taskKey {
+                let currentHex = store.taskColor(forKey: taskKey).hexString
+                choice("Automatic", isCurrent: store.taskColors[taskKey] == nil) {
+                    store.setTaskColor(taskKey, nil)
+                }
+                Divider()
+                ForEach(DashboardStore.palette) { swatch in
+                    choice(swatch.name,
+                           isCurrent: swatch.color.hexString == currentHex) {
+                        store.setTaskColor(taskKey, swatch.color)
+                    }
+                }
+            }
+        }
+        .disabled(taskKey == nil)
+    }
+
+    /// A menu entry that reads as a radio choice: checked when current, and
+    /// selecting the current one again is a no-op rather than an un-check.
+    private func choice(_ name: String,
+                        isCurrent: Bool,
+                        select: @escaping () -> Void) -> some View {
+        Toggle(name, isOn: Binding(get: { isCurrent },
+                                   set: { if $0 { select() } }))
+    }
+}
+
+/// The shared task menu for a chart segment key (a slice or a summary row),
+/// resolved to its task/subtask identity in the current scope. Aggregate
+/// segments have no identity, which leaves only "Copy task name" enabled.
+private struct SegmentMenuItems: View {
+    @ObservedObject var store: DashboardStore
+    let segmentKey: String
+
+    var body: some View {
+        let identity = store.identity(forSegment: segmentKey)
+        TaskMenuItems(store: store,
+                      openTarget: identity.map {
+                          HierarchySelection(taskKey: $0.taskKey,
+                                             subtaskKey: $0.subtaskKey)
+                      },
+                      taskKey: identity?.taskKey,
+                      subtaskKey: identity?.subtaskKey,
+                      displayName: store.displayLabel(forSegment: segmentKey))
     }
 }
 
@@ -121,6 +208,8 @@ private struct TaskRow: View {
                         }
                         .contextMenu {
                             TaskMenuItems(store: store,
+                                          openTarget: HierarchySelection(taskKey: task.key,
+                                                                         subtaskKey: sub.key),
                                           taskKey: task.key,
                                           subtaskKey: sub.key,
                                           displayName: sub.label)
@@ -134,7 +223,7 @@ private struct TaskRow: View {
     private var taskRow: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                TaskColorSwatch(store: store, taskKey: task.key, taskName: task.label)
+                TaskColorSwatch(store: store, taskKey: task.key)
                 Button {
                     store.select(HierarchySelection(taskKey: task.key), nodeID: nodeID)
                 } label: {
@@ -161,7 +250,10 @@ private struct TaskRow: View {
                       && store.selectedNodeID != nodeID)
         .contentShape(Rectangle())
         .contextMenu {
-            TaskMenuItems(store: store, taskKey: task.key, displayName: task.label)
+            TaskMenuItems(store: store,
+                          openTarget: HierarchySelection(taskKey: task.key),
+                          taskKey: task.key,
+                          displayName: task.label)
         }
         .onHover { hovering in
             if hovering {
@@ -192,7 +284,8 @@ private struct TaskRow: View {
 /// `Wellbeing - Dr. Brown`.
 private struct CategorizeMenu: View {
     @ObservedObject var store: DashboardStore
-    let taskKey: String
+    /// Nil for aggregates that can't be refiled, which disables the submenu.
+    let taskKey: String?
     /// Set on a subtask row, so only that subtask's events are refiled.
     let subtaskKey: String?
 
@@ -215,13 +308,16 @@ private struct CategorizeMenu: View {
         Menu("Categorize") {
             ForEach(categories) { category in
                 Button(category.label) {
-                    store.categorize(taskKey: taskKey,
-                                     subtaskKey: subtaskKey,
-                                     categoryLabel: category.label)
+                    if let taskKey {
+                        store.categorize(taskKey: taskKey,
+                                         subtaskKey: subtaskKey,
+                                         categoryLabel: category.label)
+                    }
                 }
             }
         }
-        .disabled(categories.isEmpty || store.isReplacing || store.isRefreshing)
+        .disabled(taskKey == nil || categories.isEmpty
+                  || store.isReplacing || store.isRefreshing)
     }
 }
 
@@ -276,14 +372,14 @@ private struct PalettePicker: View {
             Text("Task Color")
                 .font(.caption).foregroundStyle(.secondary)
             LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(Array(DashboardStore.palette.enumerated()), id: \.offset) { _, swatch in
-                    let isSelected = swatch.hexString == current.hexString
+                ForEach(DashboardStore.palette) { swatch in
+                    let isSelected = swatch.color.hexString == current.hexString
                     Button {
-                        store.setTaskColor(taskKey, swatch)
+                        store.setTaskColor(taskKey, swatch.color)
                         dismiss()
                     } label: {
                         Circle()
-                            .fill(swatch)
+                            .fill(swatch.color)
                             .frame(width: 20, height: 20)
                             .overlay(
                                 Circle().strokeBorder(Color.primary.opacity(isSelected ? 0.9 : 0.15),
@@ -297,7 +393,7 @@ private struct PalettePicker: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .help(isSelected ? "Current color" : "Set this color")
+                    .help(isSelected ? "\(swatch.name) (current)" : swatch.name)
                 }
             }
             Divider()
@@ -315,11 +411,10 @@ private struct PalettePicker: View {
 }
 
 /// A compact color swatch for a task. Clicking opens a curated palette picker;
-/// right-clicking offers a reset to the task's stable auto-color.
+/// right-clicking falls through to the enclosing row's task menu.
 private struct TaskColorSwatch: View {
     @ObservedObject var store: DashboardStore
     let taskKey: String
-    let taskName: String
     var size: CGFloat = 14
     @State private var showingPicker = false
 
@@ -340,11 +435,6 @@ private struct TaskColorSwatch: View {
         .help("Set this task's color")
         .popover(isPresented: $showingPicker, arrowEdge: .bottom) {
             PalettePicker(store: store, taskKey: taskKey)
-        }
-        .contextMenu {
-            TaskMenuItems(store: store, taskKey: taskKey, displayName: taskName)
-            Button("Reset to Auto Color") { store.setTaskColor(taskKey, nil) }
-                .disabled(store.taskColors[taskKey] == nil)
         }
     }
 }
@@ -513,7 +603,11 @@ private struct DashboardDetail: View {
                     Text(selectionTitle).font(.title2).bold()
                         .contentShape(Rectangle())
                         .contextMenu {
-                            Button("Copy task name") { copyToPasteboard(selectionTitle) }
+                            // No openTarget: this page is already showing.
+                            TaskMenuItems(store: store,
+                                          taskKey: store.selection.taskKey,
+                                          subtaskKey: store.selection.subtaskKey,
+                                          displayName: selectionTitle)
                         }
                 }
                 Text(store.isTaskLevel ? "Hours per activity by week"
@@ -1637,7 +1731,7 @@ private struct SummaryCard: View {
         )
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Copy task name") { copyToPasteboard(store.displayLabel(forSegment: key)) }
+            SegmentMenuItems(store: store, segmentKey: key)
         }
         .onHover { hovering in
             if hovering {
@@ -1693,6 +1787,11 @@ private struct WeeklyChartCard: View {
     @State private var hovered: DashboardStore.HoveredSegment?
     @State private var hoverPoint: CGPoint = .zero
     @State private var tooltipSize: CGSize = .zero
+    /// The slice the context menu describes. Unlike `hovered`, this survives
+    /// the hover-ended event AppKit sends when the menu opens (the pointer
+    /// "leaves" the view), so the menu doesn't lose its target. It refreshes on
+    /// every hover move, so it always names the slice that was right-clicked.
+    @State private var menuSegmentKey: String?
 
     var body: some View {
         Group {
@@ -1779,6 +1878,7 @@ private struct WeeklyChartCard: View {
                                     hovered = nil
                                     store.setHighlight(nil)
                                 }
+                                menuSegmentKey = hovered?.key
                                 updateCursor(for: hovered)
                             case .ended:
                                 hovered = nil
@@ -1795,6 +1895,13 @@ private struct WeeklyChartCard: View {
                             hovered = nil
                             store.setHighlight(nil)
                             store.openDetail(segmentKey: seg.key)
+                        }
+                        .contextMenu {
+                            // Right-clicking empty plot area (no tracked slice)
+                            // builds an empty menu, which AppKit doesn't show.
+                            if let key = menuSegmentKey {
+                                SegmentMenuItems(store: store, segmentKey: key)
+                            }
                         }
                     if let seg = hovered {
                         tooltip(for: seg)
