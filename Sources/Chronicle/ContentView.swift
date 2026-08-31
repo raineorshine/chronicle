@@ -1669,14 +1669,13 @@ private struct SummaryCard: View {
                             row(segmentKey: mover.segmentKey) {
                                 HStack(spacing: 5) {
                                     Text(Self.change(mover))
-                                    // The percentage hangs off the right in a
-                                    // column of its own, so the before/after
-                                    // values still line up on a mover that rose
-                                    // out of zero and has no percentage to show.
-                                    Text(Self.percent(mover) ?? "")
-                                        .foregroundStyle(Self.percentColor(mover))
+                                    // The change hangs off the right in a column
+                                    // of its own, so the before/after values
+                                    // still line up however wide it runs.
+                                    Text(Self.delta(mover))
+                                        .foregroundStyle(Self.deltaColor(mover))
                                         .lineLimit(1)
-                                        .frame(width: Self.percentColumnWidth,
+                                        .frame(width: Self.deltaColumnWidth,
                                                alignment: .leading)
                                 }
                             }
@@ -1760,24 +1759,22 @@ private struct SummaryCard: View {
         "\(hoursValue(mover.previousHours)) → \(hours(mover.currentHours))"
     }
 
-    /// The change as a percentage, e.g. "+20%". Nil for a segment that rose out
-    /// of zero: it moved, but not by any finite percentage.
-    private static func percent(_ mover: MoverEntry) -> String? {
-        guard let change = mover.percentChange else { return nil }
-        let magnitude = String(format: "%.0f", abs(change))
-        return "\(change < 0 ? "−" : "+")\(magnitude)%"
+    /// The change in hours, e.g. "+2" or "−1.5". The unit is left to the
+    /// before/after beside it, which already carries it.
+    private static func delta(_ mover: MoverEntry) -> String {
+        "\(mover.delta < 0 ? "−" : "+")\(hoursValue(abs(mover.delta)))"
     }
 
     /// Green for more time, red for less. Uses the system colors rather than the
     /// task palette so the direction reads as a signal, not as an identity, and
     /// still adapts to the viewer's appearance and accessibility settings.
-    private static func percentColor(_ mover: MoverEntry) -> Color {
+    private static func deltaColor(_ mover: MoverEntry) -> Color {
         mover.delta < 0 ? .red : .green
     }
 
-    /// Reserved width of the hanging percentage column, sized to hold a
-    /// five-character change ("+220%") at caption size.
-    private static let percentColumnWidth: CGFloat = 42
+    /// Reserved width of the hanging change column, sized to hold a
+    /// six-character change ("+120.5") at caption size.
+    private static let deltaColumnWidth: CGFloat = 42
 }
 
 // MARK: - Weekly stacked chart
