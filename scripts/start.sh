@@ -7,6 +7,7 @@
 # (or another worktree's build).
 #
 # Pass --no-launch to build (and sign) without launching.
+# Pass --background to launch without stealing focus (see the note by the launch).
 # Pass --reset-permissions to force-clear the Calendar permission (see below).
 #
 set -euo pipefail
@@ -20,10 +21,12 @@ BUILT_APP="$DERIVED/Build/Products/Debug/Chronicle.app"
 BUNDLE_ID="com.chronicle.app.dev"
 
 LAUNCH=true
+BACKGROUND=false
 FORCE_RESET_TCC=false
 for arg in "$@"; do
 	case "$arg" in
 		--no-launch) LAUNCH=false ;;
+		--background) BACKGROUND=true ;;
 		--reset-permissions) FORCE_RESET_TCC=true ;;
 		*) echo "error: unknown option: $arg" >&2; exit 1 ;;
 	esac
@@ -98,12 +101,24 @@ echo
 echo "Built: $BUILT_APP"
 
 if [[ "$LAUNCH" == true ]]; then
-	echo "==> Launching a new instance…"
 	# `open -n` starts a fresh, independent instance instead of reactivating an
 	# already-running one, so this worktree build can run alongside the installed
 	# Chronicle (or another worktree's build). We deliberately do NOT quit any
 	# running instance.
-	open -n "$BUILT_APP"
+	#
+	# `-g` additionally leaves the frontmost app alone: the window still opens on
+	# screen, just behind whatever you were using, so a build an agent kicked off
+	# doesn't yank focus out from under you. The catch is that a backgrounded window
+	# is occluded, and `screencapture -R <rect>` grabs the screen *region*, not the
+	# window — it silently returns whatever is on top instead. Only pair
+	# --background with in-process capture; see the render-view-tree-to-bitmap skill.
+	if [[ "$BACKGROUND" == true ]]; then
+		echo "==> Launching a new instance in the background…"
+		open -gn "$BUILT_APP"
+	else
+		echo "==> Launching a new instance…"
+		open -n "$BUILT_APP"
+	fi
 else
-	echo "Run it with:  open -n \"$BUILT_APP\""
+	echo "Run it with:  open -n \"$BUILT_APP\"   (add -g to leave your focus alone)"
 fi
