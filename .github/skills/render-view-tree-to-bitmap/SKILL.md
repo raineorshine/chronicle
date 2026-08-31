@@ -144,6 +144,25 @@ printf 'task\n' > /tmp/chronicle_dump.txt; open "$APP"; sleep 7   # captures /tm
 rm -f /tmp/chronicle_dump.txt                                    # so normal launches are unaffected
 ```
 
+### Launching without stealing focus
+
+`open -n` activates the app, so an agent that rebuilds mid-session yanks focus
+away from whoever is working. `scripts/start.sh --background` (`open -gn`)
+launches the same fresh instance without activating it: the window still opens
+on screen at its normal size, just behind whatever was already frontmost.
+
+**Only pair it with in-process capture.** A backgrounded window is occluded, and
+`screencapture -R <rect>` grabs the *screen region*, not the window — so it
+returns whatever is on top instead. It exits 0 and writes a correctly-sized PNG,
+so nothing looks wrong until you open the image and find the user's editor in
+it, which also drags their screen into the agent's context.
+
+| Launch | `screencapture -R` | in-process (`cacheDisplay` / `ImageRenderer`) |
+| ------ | ------------------ | --------------------------------------------- |
+| `open -n` (frontmost)   | works, until focus changes    | works |
+| `open -gn` (background) | captures whatever is on top   | works |
+| `open -gjn` (hidden)    | nothing on screen to capture  | `ImageRenderer` works; `cacheDisplay` untested against a hidden window |
+
 ## Measuring the result
 
 Read pixels back with `NSBitmapImageRep.colorAt(x:y:)`. For this dark-themed
@@ -195,6 +214,15 @@ band positions are directly comparable.
   in `MainActor.assumeIsolated { ... }` or mark the function `@MainActor`.
 - **`open` vs direct binary.** Only `open` shows the window and fires
   `onAppear`. A direct exec stays hidden.
+- **`screencapture -l <windowid>` is not an escape hatch for occlusion.**
+  Window-targeted capture fails here with `could not create image from window`,
+  whether the window is frontmost or behind. `-R` is the only path that works,
+  and it only ever sees what is actually on top.
+- **`open -gjn` hides the window, it does not merely background it.** The window
+  is still created and laid out — it shows correct bounds under
+  `CGWindowListCopyWindowInfo(.optionAll, …)` — but the on-screen list is empty,
+  so nothing screen-based can reach it. Use `-gn` (not `-gjn`) whenever a
+  capture path still needs pixels on screen.
 - **`kill` in this agent needs a literal PID.** `pgrep`, then `kill <number>`;
   `kill "$var"` / loops over variables are rejected.
 - **DerivedData path is not stable, and there are many of them.** It changes
@@ -215,6 +243,12 @@ band positions are directly comparable.
 xcodegen generate                                                   # Chronicle.xcodeproj is gitignored
 xcodebuild -project Chronicle.xcodeproj -scheme Chronicle \
   -configuration Debug build CODE_SIGNING_ALLOWED=NO
+```
+
+Or let `start.sh` build, sign, and launch a worktree instance:
+
+```bash
+./scripts/start.sh --background   # no focus steal; in-process capture only
 ```
 
 ## Cleanup checklist (do this before shipping)
