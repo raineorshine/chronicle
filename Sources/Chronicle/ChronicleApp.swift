@@ -7,7 +7,10 @@ struct ChronicleApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(store: store)
-                .frame(minWidth: 820, minHeight: 520)
+                // Roomy enough for the sidebar plus a readable detail pane, and
+                // low enough to sit in half of a small screen. The detail pane
+                // reflows below this, so a narrower window only gets tighter.
+                .frame(minWidth: 640, minHeight: 520)
         }
         .windowResizability(.contentMinSize)
         .commands {

@@ -547,7 +547,11 @@ private struct DashboardDetail: View {
                 .frame(maxHeight: .infinity)
         }
         .padding(20)
-        .frame(minWidth: 640, minHeight: 460, maxHeight: .infinity, alignment: .top)
+        // No minimum width: a floor here doesn't widen the window, it just makes
+        // the pane lay itself out wider than the split view gave it, which then
+        // centers and clips the overflow off both edges. Everything below adapts
+        // to the width instead.
+        .frame(maxWidth: .infinity, minHeight: 460, maxHeight: .infinity, alignment: .top)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 TaskSearchButton(store: store)
@@ -1493,6 +1497,18 @@ final class DropIndicator: ObservableObject {
 }
 
 private extension View {
+    /// Publishes this view's rendered width, for callers that lay themselves out
+    /// differently depending on how much room they were given.
+    func measureWidth(into width: Binding<CGFloat>) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { width.wrappedValue = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, new in width.wrappedValue = new }
+            }
+        )
+    }
+
     /// Publishes this view's rendered height, for callers that need to reason
     /// about where inside it a pointer landed.
     func measureRowHeight(into height: Binding<CGFloat>) -> some View {
@@ -1642,6 +1658,22 @@ private struct WeeksPopUpButton: NSViewRepresentable {
 /// nothing to summarize, leaving the chart's own empty state to speak.
 private struct SummaryCard: View {
     @ObservedObject var store: DashboardStore
+    /// The card's rendered width, watched so the columns can stack once they no
+    /// longer fit beside each other.
+    @State private var width: CGFloat = 0
+
+    /// Below this the two columns squeeze task names down to a few characters,
+    /// so they stack into one column instead.
+    private static let stackBelowWidth: CGFloat = 460
+
+    /// Side by side while there's room, stacked when there isn't. Both layouts
+    /// fill the available width, so the choice can't feed back into the
+    /// measurement that made it.
+    private var columnLayout: AnyLayout {
+        width > 0 && width < Self.stackBelowWidth
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+    }
 
     var body: some View {
         let top = store.topSegments
@@ -1649,7 +1681,7 @@ private struct SummaryCard: View {
         if top.isEmpty {
             EmptyView()
         } else {
-            HStack(alignment: .top, spacing: 24) {
+            columnLayout {
                 column(store.isTaskLevel ? "Top tasks" : "Top subtasks",
                        help: "Total hours over the \(store.weeksWindow) weeks charted below") {
                     ForEach(top) { entry in
@@ -1686,6 +1718,7 @@ private struct SummaryCard: View {
             .padding(16)
             .background(Color(nsColor: .controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .measureWidth(into: $width)
         }
     }
 
