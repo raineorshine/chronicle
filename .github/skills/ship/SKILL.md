@@ -101,3 +101,11 @@ git -C "$MAIN" worktree remove <this-worktree-path> && git -C "$MAIN" branch -D 
 ```
 
 Only do this when the user confirms the worktree is no longer needed. (`-D`, not `-d`: after a squash merge the branch's commits aren't ancestors of `main`, so git doesn't consider it merged.)
+
+### 9. Report completion
+
+Print:
+
+```
+🚀 Shipped
+```
