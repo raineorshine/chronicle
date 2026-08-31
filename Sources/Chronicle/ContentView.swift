@@ -55,11 +55,46 @@ private struct HierarchySidebar: View {
                 TaskMenuItems(store: store, openTarget: .all, displayName: "All Tasks")
             }
 
-            ForEach(store.taskList) { task in
+            ForEach(activeTasks) { task in
                 TaskRow(store: store, task: task)
+            }
+
+            // Activities with no time this week trail the list behind a gap:
+            // still listed, because a drop to zero is worth seeing, but set
+            // apart from what the week actually consists of.
+            if !dormantTasks.isEmpty {
+                SidebarGroupGap()
+                ForEach(dormantTasks) { task in
+                    TaskRow(store: store, task: task)
+                }
             }
         }
         .listStyle(.sidebar)
+    }
+
+    /// Activities with recorded time in the metrics week. Already the head of
+    /// `taskList`, which ranks by hours, so partitioning preserves its order.
+    private var activeTasks: [TaskSummary] {
+        store.taskList.filter { $0.hours > 0 }
+    }
+
+    /// Activities that appear in the charted window but recorded nothing this
+    /// week — the ones that have dropped off.
+    private var dormantTasks: [TaskSummary] {
+        store.taskList.filter { $0.hours == 0 }
+    }
+}
+
+/// The blank row that divides the week's activities from the dormant ones.
+/// Deliberately just a gap: the split reads on its own, and a heading here
+/// would compete with the activity names for the eye.
+private struct SidebarGroupGap: View {
+    var body: some View {
+        Color.clear
+            .frame(height: 10)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
     }
 }
 
@@ -191,7 +226,7 @@ private struct TaskRow: View {
                                       isSelected: store.selectedNodeID == subID,
                                       systemImage: "circle.fill",
                                       indent: 1,
-                                      detail: Self.hours(sub.hours),
+                                      detail: hoursLabel(sub.hours),
                                       isRecurring: store.isRecurring(taskKey: task.key,
                                                                      subtaskKey: sub.key),
                                       isHighlighted: store.isHighlighted(sub.key),
@@ -234,10 +269,12 @@ private struct TaskRow: View {
                             RecurringMarker()
                         }
                         Spacer(minLength: 8)
-                        Text(Self.hours(task.hours))
-                            .font(.caption)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                        if let hours = hoursLabel(task.hours) {
+                            Text(hours)
+                                .font(.caption)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .contentShape(Rectangle())
                 }
@@ -249,6 +286,7 @@ private struct TaskRow: View {
         .rowHighlight(active: store.isHighlighted(task.key)
                       && store.selectedNodeID != nodeID)
         .contentShape(Rectangle())
+        .dormantHint(task.hours == 0)
         .contextMenu {
             TaskMenuItems(store: store,
                           openTarget: HierarchySelection(taskKey: task.key),
@@ -272,8 +310,11 @@ private struct TaskRow: View {
         return min(1, max(0, task.hours / total))
     }
 
-    private static func hours(_ h: Double) -> String {
-        String(format: "%.1fh", h)
+    /// The tally drawn on this activity's rows, or nil for a dormant one. A
+    /// column of "0.0h" says only what the gap above the group already says,
+    /// so the dormant rows carry a tooltip instead of a number.
+    private func hoursLabel(_ h: Double) -> String? {
+        task.hours > 0 ? String(format: "%.1fh", h) : nil
     }
 }
 
@@ -513,7 +554,27 @@ private struct RowHighlight: ViewModifier {
     }
 }
 
+/// Explains the blank tally on a dormant row, which otherwise reads as a
+/// number that failed to draw. Applied only to those rows: an always-on help
+/// would put an empty tooltip on every activity.
+private struct DormantHint: ViewModifier {
+    let isDormant: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isDormant {
+            content.help("No time this week")
+        } else {
+            content
+        }
+    }
+}
+
 private extension View {
+    func dormantHint(_ isDormant: Bool) -> some View {
+        modifier(DormantHint(isDormant: isDormant))
+    }
+
     func rowHighlight(active: Bool) -> some View {
         modifier(RowHighlight(active: active))
     }
