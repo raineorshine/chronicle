@@ -108,6 +108,4 @@ Only do this when the user confirms the worktree is no longer needed. (`-D`, not
 
 Print:
 
-```
 🚀 Shipped
-```
