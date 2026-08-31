@@ -2011,19 +2011,23 @@ private struct WeeklyChartCard: View {
         }
     }
 
-    /// Resolves the stacked segment drawn under a point in the overlay's
-    /// coordinate space. Nil when the point misses the plot, falls outside the
-    /// axis domains, or lands above the week's stack.
+    /// Reads the two axis values under a point in the overlay's coordinate space
+    /// and hands them to the store to resolve against the drawn stack. Nil when
+    /// the point misses the plot or lands somewhere no slice is drawn.
+    ///
+    /// The overlay covers the axis gutters as well as the plot, and the axes
+    /// extrapolate happily past their domains, so the plot rectangle is the gate:
+    /// hovering the "Hours" labels beside the chart is not hovering a slice.
     private func segment(at location: CGPoint,
                          proxy: ChartProxy,
                          geo: GeometryProxy) -> DashboardStore.HoveredSegment? {
         guard let plotAnchor = proxy.plotFrame else { return nil }
         let plot = geo[plotAnchor]
-        guard let date: Date = proxy.value(atX: location.x - plot.origin.x),
-              let week = store.nearestWeek(to: date),
+        guard plot.contains(location),
+              let date: Date = proxy.value(atX: location.x - plot.origin.x),
               let hours: Double = proxy.value(atY: location.y - plot.origin.y)
         else { return nil }
-        return store.segment(inWeek: week, atHours: hours)
+        return store.segment(atDate: date, hours: hours)
     }
 
     /// Shows a pointing-hand cursor over slices that open a page, so the chart

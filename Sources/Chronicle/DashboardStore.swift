@@ -381,27 +381,49 @@ final class DashboardStore: ObservableObject {
         let hours: Double
     }
 
-    /// Resolves the stacked segment at `week` whose cumulative band contains the
-    /// hovered hours value `hours` (as read from the chart's Y scale). Walks the
-    /// week's points in `stacks.points` order (sorted by `segmentKey`) — the same
-    /// per-week bottom→top band order both chart styles draw from `chartPoints`, which
-    /// is how Swift Charts stacks them (first point == bottom). Returns `nil` when
-    /// the value is below zero, above the week's total, or lands on a segment with
-    /// no hours.
-    func segment(inWeek week: String, atHours hours: Double) -> HoveredSegment? {
-        guard hours >= 0 else { return nil }
-        var base = 0.0
-        for p in stacks.points where p.weekStart == week {
-            guard p.hours > 0 else { continue }
-            if hours < base + p.hours {
-                return HoveredSegment(week: week, key: p.segmentKey,
-                                      label: displayLabel(forSegment: p.segmentKey),
-                                      color: color(forSegment: p.segmentKey),
-                                      hours: p.hours)
-            }
-            base += p.hours
+    /// Resolves the stacked band drawn under a hovered point, from the `date` and
+    /// `hours` the cursor reads off the two axes.
+    ///
+    /// Area bands slope from one week's value to the next, so the stack is
+    /// interpolated across the gap the same way the chart's linear interpolation
+    /// draws it. Snapping to the nearest week instead would give every band a
+    /// rectangular hit box a half-week wide, which lines up with the drawing only
+    /// where a segment happens to be flat. Bar bands are flat, so those resolve
+    /// against the nearest week's stack directly.
+    func segment(atDate date: Date, hours: Double) -> HoveredSegment? {
+        let f = formatter()
+        let dates = windowWeekDates
+        guard let span = ChartHitTest.span(at: date, in: dates) else { return nil }
+        let leftWeek = f.string(from: dates[span.left])
+        let rightWeek = f.string(from: dates[span.right])
+        let nearWeek = span.nearest == span.left ? leftWeek : rightWeek
+        let farWeek = span.nearest == span.left ? rightWeek : leftWeek
+
+        let hit: String?
+        switch chartStyle {
+        case .area:
+            hit = ChartHitTest.segmentKey(in: stacks.points, from: leftWeek, to: rightWeek,
+                                          fraction: span.fraction, hours: hours)
+        case .bar:
+            hit = ChartHitTest.segmentKey(in: stacks.points, from: nearWeek, to: nearWeek,
+                                          fraction: 0, hours: hours)
         }
-        return nil
+        guard let key = hit else { return nil }
+
+        // The tooltip quotes a week's recorded hours, never the interpolated
+        // height under the cursor — only the weeks themselves are data. Where the
+        // band has tapered to zero at the nearer week, the tail being hovered
+        // belongs to the other one, so quote that week instead of reading "0.0h"
+        // over a visibly thick band.
+        let near = ChartHitTest.hours(in: stacks.points, week: nearWeek, segmentKey: key)
+        let quoted = near > 0 ? (week: nearWeek, hours: near)
+                              : (week: farWeek,
+                                 hours: ChartHitTest.hours(in: stacks.points,
+                                                           week: farWeek, segmentKey: key))
+        return HoveredSegment(week: quoted.week, key: key,
+                              label: displayLabel(forSegment: key),
+                              color: color(forSegment: key),
+                              hours: quoted.hours)
     }
 
     func weekDate(_ week: String) -> Date { formatter().date(from: week) ?? Date() }
@@ -461,8 +483,10 @@ final class DashboardStore: ObservableObject {
     /// sparse data, but zero-height bars draw nothing, so this single zero-filled
     /// series drives both the area and bar styles.
     /// Points are ordered per-week by `segmentKey`, matching the bottom→top band
-    /// order that `segment(inWeek:atHours:)` walks, so hover resolution stays correct
-    /// (zero-hour fillers contribute nothing and are skipped by that walk).
+    /// order `ChartHitTest` walks, so hover resolution stays correct. Hit-testing
+    /// reads the sparse `stacks.points` directly rather than this series: a missing
+    /// cell and a zero-hour filler both contribute nothing to the walk, and the
+    /// sparse array is stored rather than rebuilt on every hover event.
     var chartPoints: [WeeklyStackPoint] {
         let weeks = windowWeekStarts
         guard !weeks.isEmpty, !stacks.segments.isEmpty else { return stacks.points }
@@ -1220,15 +1244,6 @@ final class DashboardStore: ObservableObject {
     /// Whether a week-start `Date` is the current (in-progress) week.
     func isCurrentWeek(_ date: Date) -> Bool {
         formatter().string(from: date) == currentWeekStart
-    }
-
-    /// Snaps a hovered X-axis `Date` to the nearest week-start key, for resolving
-    /// which week's stack the cursor is over on the continuous axis.
-    func nearestWeek(to date: Date) -> String? {
-        let dates = windowWeekDates
-        guard !dates.isEmpty else { return nil }
-        let nearest = dates.min { abs($0.timeIntervalSince(date)) < abs($1.timeIntervalSince(date)) }
-        return nearest.map { formatter().string(from: $0) }
     }
 
     func setWeeksWindow(_ weeks: Int) {
