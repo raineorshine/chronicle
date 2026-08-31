@@ -70,10 +70,12 @@ Only push and open the PR when the user has asked to ship.
 
 ```bash
 gh pr checks --watch
-gh pr merge --squash --delete-branch
+gh pr merge --squash
 ```
 
 Squash is what gives `main` its one-commit-per-feature history with the `(#NN)` suffix. Don't use `--merge` or `--rebase`.
+
+No `--delete-branch`: it makes `gh` try to check out `main` in this worktree afterwards, which fails with `'main' is already used by worktree` — an error that reads like the merge failed when it has already landed. The merged branch is left in place for periodic cleanup.
 
 If the merge is refused because the branch is behind, go back to **step 3**, push again, and retry — GitHub is doing the same serialization the fast-forward used to, and losing the race costs only a rebase.
 
@@ -93,7 +95,7 @@ This replaces the shared `/Applications/Chronicle.app`, so another session testi
 
 ### 8. Clean up
 
-The branch is merged and `--delete-branch` removed it from the remote. If this worktree is finished with, remove it and the local branch from the main checkout:
+The merge leaves the branch in place on both the remote and here. If this worktree is finished with, remove it and the local branch from the main checkout:
 
 ```bash
 BRANCH=$(git branch --show-current) && MAIN=$(git worktree list | head -1 | awk '{print $1}')
