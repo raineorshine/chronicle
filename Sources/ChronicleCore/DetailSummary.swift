@@ -31,13 +31,6 @@ public struct MoverEntry: Equatable, Identifiable {
 
     public var delta: Double { currentHours - previousHours }
 
-    /// The change as a percentage of the previous week, or nil when there is no
-    /// baseline to measure against — a segment rising out of zero has moved, but
-    /// not by any finite percentage.
-    public var percentChange: Double? {
-        previousHours > 0 ? delta / previousHours * 100 : nil
-    }
-
     public init(segmentKey: String, label: String, previousHours: Double, currentHours: Double) {
         self.segmentKey = segmentKey
         self.label = label

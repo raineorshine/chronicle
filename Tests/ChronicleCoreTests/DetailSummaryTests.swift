@@ -60,10 +60,9 @@ final class DetailSummaryTests: XCTestCase {
         // -8, +3, +2 by magnitude.
         XCTAssertEqual(movers.map(\.segmentKey), ["down", "small", "up"])
         XCTAssertEqual(movers[0].delta, -8)
-        XCTAssertEqual(movers[0].percentChange.map { ($0).rounded() }, -89)
     }
 
-    func testMoverAppearingFromNothingHasNoPercentChange() {
+    func testMoverAppearingFromNothingCountsAllOfItsHours() {
         let stacks = WeeklyStacks(points: [point("2026-07-13", "news", 4)],
                                   segments: [segment("news", "News", 4)],
                                   weekStarts: ["2026-07-06", "2026-07-13"])
@@ -75,7 +74,7 @@ final class DetailSummaryTests: XCTestCase {
         XCTAssertEqual(movers.count, 1)
         XCTAssertEqual(movers[0].previousHours, 0)
         XCTAssertEqual(movers[0].currentHours, 4)
-        XCTAssertNil(movers[0].percentChange)
+        XCTAssertEqual(movers[0].delta, 4)
     }
 
     func testSegmentsThatBarelyBudgedAreNotMovers() {
