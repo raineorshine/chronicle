@@ -1,6 +1,6 @@
 ---
 name: ship
-description: 'Finish a feature branch in a worktree: run quality gates, commit, push, open a PR, squash-merge it, and update the main checkout. Use when done with a change and want it on main.'
+description: 'Finish a feature branch in a worktree: run quality gates, commit, push, open a PR, squash-merge it, update the main checkout, and extract the session's learnings. Use when done with a change and want it on main.'
 ---
 
 # Ship (finish feature → merge to main)
@@ -104,7 +104,15 @@ git -C "$MAIN" worktree remove <this-worktree-path> && git -C "$MAIN" branch -D 
 
 Only do this when the user confirms the worktree is no longer needed. (`-D`, not `-d`: after a squash merge the branch's commits aren't ancestors of `main`, so git doesn't consider it merged.)
 
-### 9. Report completion
+### 9. Extract the learnings
+
+Invoke the `learn` skill. A shipped change is the moment its lessons are worth writing down: the branch is landed, nothing is pending, and whatever the session learned about the app, the tree or the workflow is still in context — an hour later it is in nobody's. This is not optional and the user does not have to ask for it; it is the last stage of shipping.
+
+Skip it only when `learn` or `learn-organize` is what invoked this ship — their own procedures end in one, and landing those learnings is that ship's whole job. Otherwise the two call each other forever.
+
+If `learn` finds nothing worth recording, that is a normal outcome — say so in one line and move on.
+
+### 10. Report completion
 
 Print:
 
