@@ -1,6 +1,6 @@
 ---
 name: ship
-description: 'Finish a feature branch in a worktree: run quality gates, commit, push, open a PR, squash-merge it, update the main checkout, and extract the session's learnings. Use when done with a change and want it on main.'
+description: 'Finish a feature branch in a worktree: run quality gates, commit, push, open a PR, squash-merge it, update the main checkout, extract the session's learnings, and archive the session. Use when done with a change and want it on main.'
 ---
 
 # Ship (finish feature → merge to main)
@@ -93,18 +93,7 @@ Run ./scripts/install-app.sh to install the new build to /Applications.
 
 This replaces the shared `/Applications/Chronicle.app`, so another session testing the installed app will be testing this build afterwards. When the fresh build is ad-hoc signed the script also resets the app's Calendar permission (it prints a line saying so) — expect to re-grant access on the next launch.
 
-### 8. Clean up
-
-The merge leaves the branch in place on both the remote and here. If this worktree is finished with, remove it and the local branch from the main checkout:
-
-```bash
-BRANCH=$(git branch --show-current) && MAIN=$(git worktree list | head -1 | awk '{print $1}')
-git -C "$MAIN" worktree remove <this-worktree-path> && git -C "$MAIN" branch -D "$BRANCH"
-```
-
-Only do this when the user confirms the worktree is no longer needed. (`-D`, not `-d`: after a squash merge the branch's commits aren't ancestors of `main`, so git doesn't consider it merged.)
-
-### 9. Extract the learnings
+### 8. Extract the learnings
 
 Invoke the `learn` skill. A shipped change is the moment its lessons are worth writing down: the branch is landed, nothing is pending, and whatever the session learned about the app, the tree or the workflow is still in context — an hour later it is in nobody's. This is not optional and the user does not have to ask for it; it is the last stage of shipping.
 
@@ -112,8 +101,24 @@ Skip it only when `learn` or `learn-organize` is what invoked this ship — thei
 
 If `learn` finds nothing worth recording, that is a normal outcome — say so in one line and move on.
 
-### 10. Report completion
+### 9. Report completion
 
 Print:
 
 🚀 Shipped
+
+### 10. Archive the session
+
+Last of all, after `learn` has finished, archive this session: `mcp__ccd_session_mgmt__archive_session` with `"self"`
+and a reason naming the ship. It is the final tool call of the ship, made in the same response as the completion message and after it — nothing after the
+archive reaches the user. Asking to ship is the agreement to archive; do not ask again.
+
+Skip it when `learn` or `learn-organize` invoked this ship: the session goes on after that ship. A
+ship that never merged is still work in progress and keeps its session.
+
+**The archive refuses while anything of this session is still pending** — a background task, an armed
+waiter, a scheduled wakeup left as a fallback. Stop each one first (a pending wakeup is cancelled with
+`ScheduleWakeup` and `stop: true`); if it still refuses, the user archives from the sidebar.
+
+Archiving removes the session's worktree, if it has one. The branch outlives it, and the session is
+reopened from the Archived list if it is ever needed again.
