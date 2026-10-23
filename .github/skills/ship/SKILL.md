@@ -109,7 +109,8 @@ Print:
 
 ### 10. Archive the session
 
-Last of all, after `learn` has finished, archive this session: `mcp__ccd_session_mgmt__archive_session` with `"self"`
+Last of all, after `learn` has finished, archive this session: `mcp__ccd_session_mgmt__archive_session` with `"self"`,
+or in a cloud session `mcp__claude-code-remote__archive_session` with this session's `ccr.id`,
 and a reason naming the ship. It is the final tool call of the ship, made in the same response as the completion message and after it — nothing after the
 archive reaches the user. Asking to ship is the agreement to archive; do not ask again.
 
